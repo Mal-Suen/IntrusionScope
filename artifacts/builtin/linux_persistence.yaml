@@ -1,0 +1,70 @@
+# IntrusionScope Artifact: Linux Persistence
+# Detects common persistence mechanisms on Linux
+
+name: linux.persistence
+version: "1.0"
+author: IntrusionScope Team
+description: |
+  Collects Linux persistence mechanisms including:
+  - Cron jobs
+  - Systemd services
+  - Init scripts
+  - Profile scripts
+  - SSH authorized keys
+references:
+  - https://attack.mitre.org/techniques/T1543/
+tags:
+  - persistence
+  - linux
+  - detection
+platform:
+  - linux
+
+sources:
+  - name: cron_jobs
+    type: filesystem
+    query: |
+      SELECT * FROM filesystem.cron_jobs
+  - name: systemd_services
+    type: filesystem
+    query: |
+      SELECT * FROM filesystem.systemd_services
+  - name: profile_scripts
+    type: filesystem
+    query: |
+      SELECT * FROM filesystem.recent_files 
+      WHERE path IN ('/etc/profile', '/etc/profile.d/', '/etc/bash.bashrc', '/etc/bashrc')
+  - name: ssh_keys
+    type: filesystem
+    query: |
+      SELECT * FROM filesystem.recent_files 
+      WHERE path LIKE '%/.ssh/authorized_keys%'
+
+analysis:
+  queries:
+    - name: suspicious_cron
+      query: |
+        SELECT * FROM results 
+        WHERE source = 'cron_jobs'
+        AND (line LIKE '%curl%' OR line LIKE '%wget%' OR line LIKE '%bash -i%')
+      severity: 4
+    - name: reverse_shell_service
+      query: |
+        SELECT * FROM results 
+        WHERE source = 'systemd_services'
+        AND (content LIKE '%bash -i%' OR content LIKE '%nc -%' OR content LIKE '%/dev/tcp%')
+      severity: 5
+    - name: new_ssh_key
+      query: |
+        SELECT * FROM results 
+        WHERE source = 'ssh_keys'
+        AND mod_time > NOW() - INTERVAL 7 DAY
+      severity: 3
+
+output:
+  format: json
+  fields:
+    - source
+    - file
+    - line
+    - content

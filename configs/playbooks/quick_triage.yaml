@@ -1,0 +1,21 @@
+# Quick Collection Playbook
+# Fast collection for initial triage (< 1 minute)
+
+name: quick_triage
+version: "1.0"
+description: Quick collection for initial incident triage
+estimated_time: 60s
+
+artifacts:
+  - process.list
+  - network.connections
+  - network.dns_cache
+  - users.logged_in
+
+detection:
+  enabled: true
+  min_severity: high
+
+output:
+  format: json
+  compress: false

@@ -1,0 +1,72 @@
+# IntrusionScope Artifact: Persistence Mechanisms
+# Detects common persistence mechanisms on Windows
+
+name: windows.persistence
+version: "1.0"
+author: IntrusionScope Team
+description: |
+  Collects Windows persistence mechanisms including:
+  - Registry Run keys
+  - Scheduled Tasks
+  - Services
+  - WMI Event Consumers
+  - Browser Extensions
+references:
+  - https://attack.mitre.org/techniques/T1547/
+tags:
+  - persistence
+  - windows
+  - detection
+platform:
+  - windows
+
+sources:
+  - name: registry_run_keys
+    type: registry
+    query: |
+      SELECT * FROM registry.run_keys
+    conditions:
+      - type: os_check
+        value: windows
+  - name: scheduled_tasks
+    type: tasks
+    query: |
+      SELECT * FROM filesystem.scheduled_tasks
+  - name: services
+    type: registry
+    query: |
+      SELECT * FROM registry.services
+  - name: persistence_registry
+    type: registry
+    query: |
+      SELECT * FROM registry.persistence
+
+analysis:
+  queries:
+    - name: suspicious_run_key
+      query: |
+        SELECT * FROM results 
+        WHERE source = 'registry_run_keys' 
+        AND (value LIKE '%powershell%' OR value LIKE '%cmd%' OR value LIKE '%wscript%')
+      severity: 4
+    - name: unknown_service
+      query: |
+        SELECT * FROM results 
+        WHERE source = 'services' 
+        AND path NOT LIKE '%System32%' 
+        AND path NOT LIKE '%Program Files%'
+      severity: 3
+    - name: suspicious_task
+      query: |
+        SELECT * FROM results 
+        WHERE source = 'scheduled_tasks'
+        AND (command LIKE '%powershell%' OR command LIKE '%-enc%')
+      severity: 4
+
+output:
+  format: json
+  fields:
+    - source
+    - key
+    - value
+    - path

@@ -1,0 +1,81 @@
+# IntrusionScope Artifact: Suspicious Process Detection
+# Detects suspicious processes based on behavior and characteristics
+
+name: detection.suspicious_processes
+version: "1.0"
+author: IntrusionScope Team
+description: |
+  Detects suspicious processes based on:
+  - Known malware names
+  - Suspicious command lines
+  - Unusual parent-child relationships
+  - LOLBin usage
+references:
+  - https://attack.mitre.org/techniques/T1059/
+tags:
+  - detection
+  - process
+  - malware
+platform:
+  - linux
+  - windows
+
+sources:
+  - name: process_list
+    type: process
+    query: |
+      SELECT * FROM process.list
+
+analysis:
+  queries:
+    - name: mimikatz
+      query: |
+        SELECT * FROM results 
+        WHERE name LIKE '%mimikatz%' OR cmdline LIKE '%mimikatz%'
+      severity: 5
+    - name: encoded_powershell
+      query: |
+        SELECT * FROM results 
+        WHERE (name = 'powershell.exe' OR name = 'pwsh')
+        AND (cmdline LIKE '%-enc%' OR cmdline LIKE '%-encodedcommand%')
+      severity: 5
+    - name: download_command
+      query: |
+        SELECT * FROM results 
+        WHERE cmdline LIKE '%downloadstring%' 
+        OR cmdline LIKE '%downloadfile%'
+        OR cmdline LIKE '%invoke-webrequest%'
+      severity: 4
+    - name: certutil_download
+      query: |
+        SELECT * FROM results 
+        WHERE name = 'certutil.exe' 
+        AND (cmdline LIKE '%urlcache%' OR cmdline LIKE '%split%')
+      severity: 5
+    - name: mshta_remote
+      query: |
+        SELECT * FROM results 
+        WHERE name = 'mshta.exe' 
+        AND (cmdline LIKE '%http%' OR cmdline LIKE '%ftp%')
+      severity: 5
+    - name: wmi_remote
+      query: |
+        SELECT * FROM results 
+        WHERE cmdline LIKE '%wmic%process%call%create%'
+        AND cmdline LIKE '%http%'
+      severity: 5
+    - name: suspicious_parent
+      query: |
+        SELECT * FROM results 
+        WHERE (ppid_name IN ('notepad.exe', 'calc.exe', 'wordpad.exe', 'explorer.exe'))
+        AND (name IN ('cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe'))
+      severity: 4
+
+output:
+  format: json
+  fields:
+    - pid
+    - name
+    - cmdline
+    - ppid
+    - ppid_name

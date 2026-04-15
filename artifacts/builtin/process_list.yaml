@@ -1,0 +1,66 @@
+# IntrusionScope Artifact: Process List Collection
+# Collects running process information
+
+name: process.list
+version: "1.0"
+author: IntrusionScope Team
+description: |
+  Collects a list of running processes including PID, name, path,
+  command line arguments, and parent process information.
+references:
+  - https://github.com/Velocidex/velociraptor
+tags:
+  - process
+  - collection
+  - baseline
+platform:
+  - linux
+  - windows
+
+parameters:
+  - name: include_cmdline
+    type: bool
+    default: true
+    description: Include full command line arguments
+  - name: include_env
+    type: bool
+    default: false
+    description: Include environment variables
+
+sources:
+  - name: process_list
+    type: process
+    query: |
+      SELECT * FROM process.list
+    conditions:
+      - type: os_check
+        value: all
+
+analysis:
+  queries:
+    - name: suspicious_name
+      query: |
+        SELECT * FROM results WHERE name IN ('mimikatz', 'procdump', 'lazagne')
+      severity: 5
+      condition: match
+    - name: suspicious_path
+      query: |
+        SELECT * FROM results WHERE path LIKE '%\Temp\%' OR path LIKE '%/tmp/%'
+      severity: 3
+      condition: match
+    - name: encoded_command
+      query: |
+        SELECT * FROM results WHERE cmdline LIKE '%-enc%' OR cmdline LIKE '%-encodedcommand%'
+      severity: 4
+      condition: match
+
+output:
+  format: json
+  fields:
+    - pid
+    - name
+    - path
+    - cmdline
+    - ppid
+  sort_by: pid
+  sort_order: asc

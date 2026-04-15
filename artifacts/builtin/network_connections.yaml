@@ -1,0 +1,59 @@
+# IntrusionScope Artifact: Network Connections
+# Collects active network connections
+
+name: network.connections
+version: "1.0"
+author: IntrusionScope Team
+description: |
+  Collects active network connections including TCP and UDP,
+  with local/remote addresses, ports, and process information.
+references:
+  - https://www.sans.org/information-security-resources/
+tags:
+  - network
+  - collection
+  - baseline
+platform:
+  - linux
+  - windows
+
+sources:
+  - name: tcp_connections
+    type: network
+    query: |
+      SELECT * FROM network.connections WHERE proto IN ('tcp', 'tcp6')
+  - name: udp_connections
+    type: network
+    query: |
+      SELECT * FROM network.connections WHERE proto IN ('udp', 'udp6')
+
+analysis:
+  queries:
+    - name: connection_to_suspicious_port
+      query: |
+        SELECT * FROM results 
+        WHERE remote_port IN (4444, 5555, 6666, 7777, 8888, 9999)
+      severity: 4
+    - name: connection_to_tor
+      query: |
+        SELECT * FROM results 
+        WHERE remote_port = 9001 OR remote_port = 9050
+      severity: 3
+    - name: established_to_unknown
+      query: |
+        SELECT * FROM results 
+        WHERE state = 'ESTABLISHED' AND remote_ip NOT LIKE '192.168.%' 
+        AND remote_ip NOT LIKE '10.%' AND remote_ip NOT LIKE '172.1[6-9].%'
+        AND remote_ip NOT LIKE '172.2[0-9].%' AND remote_ip NOT LIKE '172.3[0-1].%'
+      severity: 2
+
+output:
+  format: json
+  fields:
+    - proto
+    - local_ip
+    - local_port
+    - remote_ip
+    - remote_port
+    - state
+  sort_by: proto

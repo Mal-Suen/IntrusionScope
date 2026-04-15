@@ -1,0 +1,39 @@
+# Standard Collection Playbook
+# Comprehensive collection for most investigations (< 5 minutes)
+
+name: standard_investigation
+version: "1.0"
+description: Standard collection for incident investigation
+estimated_time: 300s
+
+artifacts:
+  # Process information
+  - process.list
+  - process.tree
+  
+  # Network information
+  - network.connections
+  - network.dns_cache
+  - network.listening_ports
+  
+  # User activity
+  - users.logged_in
+  - users.sudo_history
+  
+  # Filesystem
+  - filesystem.recent_files
+  
+  # Platform-specific
+  - registry.run_keys        # Windows
+  - filesystem.cron_jobs     # Linux
+  - filesystem.scheduled_tasks  # Windows
+
+detection:
+  enabled: true
+  min_severity: medium
+  enable_ioc: true
+  enable_sigma: true
+
+output:
+  format: json
+  compress: true

@@ -13,26 +13,30 @@ package detector
 // Opaque handle to the engine
 typedef void* EngineHandle;
 
+// Detection result handle
+typedef void* ResultHandle;
+
 // Engine creation and destruction
 extern EngineHandle engine_new();
 extern void engine_free(EngineHandle engine);
 
 // IOC loading
 extern int engine_load_iocs(EngineHandle engine, const char* iocs_json);
-extern int engine_add_pattern(EngineHandle engine, const char* pattern, const char* tag);
+
+// Pattern matching - third param is pattern id (size_t)
+extern int engine_add_pattern(EngineHandle engine, const char* pattern, size_t id);
 extern int engine_build(EngineHandle engine);
 
-// Detection
-extern char* engine_detect(EngineHandle engine, const char* content);
-extern char* engine_detect_json(EngineHandle engine, const char* content);
+// Detection - returns ResultHandle, not string
+extern ResultHandle engine_detect_json(EngineHandle engine, const char* json);
 
 // Result accessors
-extern int result_count(EngineHandle engine);
-extern char* result_get_ioc_type(EngineHandle engine, int index);
-extern char* result_get_value(EngineHandle engine, int index);
-extern char* result_get_tag(EngineHandle engine, int index);
-extern int result_get_severity(EngineHandle engine, int index);
-extern void result_free(EngineHandle engine);
+extern size_t result_match_count(ResultHandle result);
+extern char* result_match_signature_id(ResultHandle result, size_t index);
+extern int result_match_severity(ResultHandle result, size_t index);
+extern char* result_to_json(ResultHandle result);
+extern void result_free(ResultHandle result);
+extern void string_free(char* s);
 */
 import "C"
 import (
@@ -48,25 +52,32 @@ type RustEngine struct {
 }
 
 // IOCDefinition represents an IOC to load into the engine
+// Must match Rust's IOC struct in engine/src/types.rs
 type IOCDefinition struct {
-	Type     string `json:"type"`     // hash, ip, domain, url
-	Value    string `json:"value"`    // The IOC value
-	Tag      string `json:"tag"`      // Optional tag
-	Severity int    `json:"severity"` // Optional severity (1-5)
+	ID          string   `json:"id"`                    // IOC identifier
+	Value       string   `json:"value"`                 // The IOC value
+	IOCType     string   `json:"ioc_type"`              // MD5, SHA1, SHA256, IP, Domain, URL, Email, FilePath, Registry
+	Severity    int      `json:"severity"`              // 1-5 (Info, Low, Medium, High, Critical)
+	Description string   `json:"description,omitempty"` // Optional description
+	Tags        []string `json:"tags,omitempty"`        // Optional tags
+	Source      string   `json:"source,omitempty"`      // Optional source
 }
 
 // EngineMatch represents a detection match from the Rust engine
 type EngineMatch struct {
-	IOCType  string `json:"ioc_type"`
-	Value    string `json:"value"`
-	Tag      string `json:"tag"`
-	Severity int    `json:"severity"`
+	SignatureID   string            `json:"signature_id"`
+	SignatureName string            `json:"signature_name"`
+	Severity      int               `json:"severity"`
+	Position      int               `json:"position"`
+	Length        int               `json:"length"`
+	Details       map[string]string `json:"details"`
 }
 
 // EngineResult represents the result of a detection operation
 type EngineResult struct {
-	Matches []EngineMatch `json:"matches"`
-	Error   string        `json:"error,omitempty"`
+	Matches       []EngineMatch `json:"matches"`
+	TotalMatches  int           `json:"total_matches"`
+	DetectionTime uint64        `json:"detection_time_us"`
 }
 
 // NewRustEngine creates a new Rust detection engine
@@ -90,6 +101,11 @@ func (e *RustEngine) Close() {
 func (e *RustEngine) LoadIOCs(iocs []IOCDefinition) error {
 	if e.handle == nil {
 		return fmt.Errorf("engine not initialized")
+	}
+
+	// Skip if no IOCs
+	if len(iocs) == 0 {
+		return nil
 	}
 
 	data, err := json.Marshal(iocs)
@@ -126,17 +142,15 @@ func (e *RustEngine) LoadIOCsFromJSON(jsonStr string) error {
 }
 
 // AddPattern adds a pattern to the Aho-Corasick matcher
-func (e *RustEngine) AddPattern(pattern, tag string) error {
+func (e *RustEngine) AddPattern(pattern string, id int) error {
 	if e.handle == nil {
 		return fmt.Errorf("engine not initialized")
 	}
 
 	cPattern := C.CString(pattern)
-	cTag := C.CString(tag)
 	defer C.free(unsafe.Pointer(cPattern))
-	defer C.free(unsafe.Pointer(cTag))
 
-	result := C.engine_add_pattern(e.handle, cPattern, cTag)
+	result := C.engine_add_pattern(e.handle, cPattern, C.size_t(id))
 	if result != 0 {
 		return fmt.Errorf("failed to add pattern, error code: %d", result)
 	}
@@ -167,13 +181,20 @@ func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	cContent := C.CString(content)
 	defer C.free(unsafe.Pointer(cContent))
 
-	result := C.engine_detect_json(e.handle, cContent)
-	if result == nil {
+	resultHandle := C.engine_detect_json(e.handle, cContent)
+	if resultHandle == nil {
 		return &EngineResult{Matches: []EngineMatch{}}, nil
 	}
-	defer C.free(unsafe.Pointer(result))
+	defer C.result_free(resultHandle)
 
-	resultStr := C.GoString(result)
+	// Get JSON result
+	jsonPtr := C.result_to_json(resultHandle)
+	if jsonPtr == nil {
+		return &EngineResult{Matches: []EngineMatch{}}, nil
+	}
+	defer C.string_free(jsonPtr)
+
+	resultStr := C.GoString(jsonPtr)
 	var engineResult EngineResult
 	if err := json.Unmarshal([]byte(resultStr), &engineResult); err != nil {
 		return nil, fmt.Errorf("failed to parse detection result: %w", err)
@@ -206,9 +227,9 @@ func (e *RustEngine) LoadIOCsFromFile(filepath string) error {
 }
 
 // AddPatterns adds multiple patterns at once
-func (e *RustEngine) AddPatterns(patterns map[string]string) error {
-	for pattern, tag := range patterns {
-		if err := e.AddPattern(pattern, tag); err != nil {
+func (e *RustEngine) AddPatterns(patterns map[string]int) error {
+	for pattern, id := range patterns {
+		if err := e.AddPattern(pattern, id); err != nil {
 			return err
 		}
 	}
@@ -240,9 +261,11 @@ func (e *RustEngine) DetectHashes(hashes map[string]string) (*EngineResult, erro
 	var iocs []IOCDefinition
 	for hashType, hashValue := range hashes {
 		iocs = append(iocs, IOCDefinition{
-			Type:  "hash",
-			Value: strings.ToLower(hashValue),
-			Tag:   hashType,
+			ID:       hashType + "_" + hashValue[:16],
+			Value:    strings.ToLower(hashValue),
+			IOCType:  "SHA256",
+			Severity: 3,
+			Tags:     []string{hashType},
 		})
 	}
 

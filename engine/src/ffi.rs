@@ -36,7 +36,10 @@ pub extern "C" fn engine_load_iocs(
     }
 
     let engine = unsafe { &mut *engine };
-    let json_str = unsafe { CStr::from_ptr(json) }.to_str().unwrap_or("");
+    let json_str = match unsafe { CStr::from_ptr(json) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
 
     match serde_json::from_str::<Vec<IOC>>(json_str) {
         Ok(iocs) => {

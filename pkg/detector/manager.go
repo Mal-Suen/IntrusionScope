@@ -96,6 +96,11 @@ func (m *Manager) LoadIOCsFromDir(dir string) error {
 
 // LoadIOCs loads IOCs into all engines
 func (m *Manager) LoadIOCs(iocs []IOCDefinition) error {
+	// Skip if no IOCs to load
+	if len(iocs) == 0 {
+		return nil
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -234,18 +239,18 @@ func (m *Manager) GetIOCDatabase() *IOCDatabase {
 }
 
 // AddPattern adds a pattern to the engine
-func (m *Manager) AddPattern(pattern, tag string) error {
+func (m *Manager) AddPattern(pattern string, id int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.engine != nil {
-		return m.engine.AddPattern(pattern, tag)
+		return m.engine.AddPattern(pattern, id)
 	}
 	return nil
 }
 
 // AddPatterns adds multiple patterns
-func (m *Manager) AddPatterns(patterns map[string]string) error {
+func (m *Manager) AddPatterns(patterns map[string]int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -279,11 +284,11 @@ func (db *IOCDatabase) Add(ioc IOCDefinition) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	iocType := strings.ToLower(ioc.Type)
+	iocType := strings.ToLower(ioc.IOCType)
 	iocValue := strings.ToLower(ioc.Value)
 
 	switch iocType {
-	case "hash", "md5", "sha1", "sha256":
+	case "md5", "sha1", "sha256", "hash":
 		db.hashes[iocValue] = ioc
 	case "ip", "ipv4", "ipv6":
 		db.ips[iocValue] = ioc
@@ -306,10 +311,10 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 	for value, ioc := range db.hashes {
 		if strings.Contains(contentLower, value) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "hash",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 3,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
@@ -318,10 +323,10 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 	for value, ioc := range db.ips {
 		if strings.Contains(content, value) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "ip",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 3,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
@@ -330,10 +335,10 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 	for value, ioc := range db.domains {
 		if strings.Contains(contentLower, value) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "domain",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 2,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
@@ -342,10 +347,10 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 	for value, ioc := range db.urls {
 		if strings.Contains(contentLower, value) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "url",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 2,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}

@@ -13,7 +13,7 @@ import (
 // RustEngine is a pure Go fallback when CGO is not available
 type RustEngine struct {
 	iocs     map[string][]IOCDefinition
-	patterns map[string]string
+	patterns map[string]int
 	built    bool
 }
 
@@ -26,7 +26,7 @@ func NewRustEngine() (*RustEngine, error) {
 			"domain": {},
 			"url":    {},
 		},
-		patterns: make(map[string]string),
+		patterns: make(map[string]int),
 		built:    false,
 	}, nil
 }
@@ -39,9 +39,16 @@ func (e *RustEngine) Close() {
 // LoadIOCs loads IOC definitions into the engine
 func (e *RustEngine) LoadIOCs(iocs []IOCDefinition) error {
 	for _, ioc := range iocs {
-		iocType := strings.ToLower(ioc.Type)
-		if _, ok := e.iocs[iocType]; ok {
-			e.iocs[iocType] = append(e.iocs[iocType], ioc)
+		iocType := strings.ToLower(ioc.IOCType)
+		switch iocType {
+		case "md5", "sha1", "sha256", "hash":
+			e.iocs["hash"] = append(e.iocs["hash"], ioc)
+		case "ip", "ipv4", "ipv6":
+			e.iocs["ip"] = append(e.iocs["ip"], ioc)
+		case "domain":
+			e.iocs["domain"] = append(e.iocs["domain"], ioc)
+		case "url":
+			e.iocs["url"] = append(e.iocs["url"], ioc)
 		}
 	}
 	return nil
@@ -57,8 +64,8 @@ func (e *RustEngine) LoadIOCsFromJSON(jsonStr string) error {
 }
 
 // AddPattern adds a pattern to the matcher
-func (e *RustEngine) AddPattern(pattern, tag string) error {
-	e.patterns[pattern] = tag
+func (e *RustEngine) AddPattern(pattern string, id int) error {
+	e.patterns[pattern] = id
 	return nil
 }
 
@@ -81,10 +88,10 @@ func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	for _, ioc := range e.iocs["hash"] {
 		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "hash",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 3,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
@@ -93,10 +100,10 @@ func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	for _, ioc := range e.iocs["ip"] {
 		if strings.Contains(content, ioc.Value) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "ip",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 3,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
@@ -105,10 +112,10 @@ func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	for _, ioc := range e.iocs["domain"] {
 		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "domain",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 2,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
@@ -117,27 +124,27 @@ func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	for _, ioc := range e.iocs["url"] {
 		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "url",
-				Value:    ioc.Value,
-				Tag:      ioc.Tag,
-				Severity: 2,
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
 			})
 		}
 	}
 
 	// Check patterns
-	for pattern, tag := range e.patterns {
+	for pattern, id := range e.patterns {
 		if strings.Contains(contentLower, strings.ToLower(pattern)) {
 			matches = append(matches, EngineMatch{
-				IOCType:  "pattern",
-				Value:    pattern,
-				Tag:      tag,
-				Severity: 1,
+				SignatureID:   fmt.Sprintf("pattern_%d", id),
+				SignatureName: fmt.Sprintf("Pattern %d", id),
+				Severity:      2,
+				Details:       map[string]string{"pattern": pattern},
 			})
 		}
 	}
 
-	return &EngineResult{Matches: matches}, nil
+	return &EngineResult{Matches: matches, TotalMatches: len(matches)}, nil
 }
 
 // DetectMap performs detection on a map of data
@@ -160,9 +167,9 @@ func (e *RustEngine) LoadIOCsFromFile(filepath string) error {
 }
 
 // AddPatterns adds multiple patterns at once
-func (e *RustEngine) AddPatterns(patterns map[string]string) error {
-	for pattern, tag := range patterns {
-		e.patterns[pattern] = tag
+func (e *RustEngine) AddPatterns(patterns map[string]int) error {
+	for pattern, id := range patterns {
+		e.patterns[pattern] = id
 	}
 	return nil
 }

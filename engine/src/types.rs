@@ -1,10 +1,10 @@
 //! Common types for the detection engine
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
 /// Severity level for detections
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[repr(i32)]
 pub enum Severity {
     Info = 1,
@@ -12,6 +12,33 @@ pub enum Severity {
     Medium = 3,
     High = 4,
     Critical = 5,
+}
+
+impl<'de> Deserialize<'de> for Severity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Accept both integer and string representations
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::Number(n) => {
+                let v = n.as_i64().unwrap_or(3);
+                Ok(Severity::from(v as i32))
+            }
+            serde_json::Value::String(s) => {
+                match s.to_lowercase().as_str() {
+                    "info" | "1" => Ok(Severity::Info),
+                    "low" | "2" => Ok(Severity::Low),
+                    "medium" | "3" => Ok(Severity::Medium),
+                    "high" | "4" => Ok(Severity::High),
+                    "critical" | "5" => Ok(Severity::Critical),
+                    _ => Ok(Severity::Medium),
+                }
+            }
+            _ => Ok(Severity::Medium),
+        }
+    }
 }
 
 impl Default for Severity {
@@ -71,17 +98,21 @@ pub struct IOC {
     /// IOC type
     pub ioc_type: IOCType,
     /// Severity level
+    #[serde(default)]
     pub severity: Severity,
     /// Description
+    #[serde(default)]
     pub description: Option<String>,
     /// Tags
+    #[serde(default)]
     pub tags: Vec<String>,
     /// Source where IOC was obtained
+    #[serde(default)]
     pub source: Option<String>,
 }
 
 /// Type of IOC
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum IOCType {
     /// MD5 hash
     MD5,
@@ -101,6 +132,32 @@ pub enum IOCType {
     FilePath,
     /// Registry key
     Registry,
+}
+
+impl<'de> Deserialize<'de> for IOCType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::String(s) => {
+                match s.to_lowercase().as_str() {
+                    "md5" | "hash" => Ok(IOCType::MD5),
+                    "sha1" => Ok(IOCType::SHA1),
+                    "sha256" => Ok(IOCType::SHA256),
+                    "ip" | "ipv4" | "ipv6" => Ok(IOCType::IP),
+                    "domain" => Ok(IOCType::Domain),
+                    "url" => Ok(IOCType::URL),
+                    "email" => Ok(IOCType::Email),
+                    "filepath" | "file" | "path" => Ok(IOCType::FilePath),
+                    "registry" | "reg" => Ok(IOCType::Registry),
+                    _ => Ok(IOCType::SHA256), // Default fallback
+                }
+            }
+            _ => Ok(IOCType::SHA256),
+        }
+    }
 }
 
 /// Record to analyze

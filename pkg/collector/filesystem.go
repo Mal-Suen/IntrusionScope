@@ -423,7 +423,7 @@ func (c *FilesystemCronJobsCollector) Collect(ctx context.Context, opts *Options
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
-				*records = append(*records, Record{
+				records = append(records, Record{
 					Timestamp: time.Now(),
 					Source:    "cron_period",
 					Data: map[string]interface{}{

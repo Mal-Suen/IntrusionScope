@@ -182,7 +182,6 @@ func (d *SigmaDetector) matchField(key string, value interface{}, data map[strin
 
 		// Handle wildcards
 		if strings.Contains(v, "*") {
-			pattern := strings.ReplaceAll(v, "*", ".*")
 			return strings.Contains(strings.ToLower(strData), strings.ToLower(strings.Trim(v, "*")))
 		}
 		return strings.EqualFold(strData, v)

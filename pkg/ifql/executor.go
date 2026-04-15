@@ -67,20 +67,21 @@ func (e *Executor) loadSource(source string) ([]map[string]interface{}, error) {
 
 	// Map source names to file patterns
 	sourceFiles := map[string]string{
-		"process.list":            "process_list_*.json",
-		"process.tree":            "process_tree_*.json",
-		"network.connections":     "network_connections_*.json",
-		"network.dns_cache":       "dns_cache_*.json",
-		"filesystem.recent_files": "recent_files_*.json",
-		"filesystem.bash_history": "bash_history_*.json",
-		"registry.run_keys":       "registry_run_*.json",
-		"log.auth":                "auth_log_*.json",
+		"process.list":            "process.list*.json",
+		"process.tree":            "process.tree*.json",
+		"network.connections":     "network.connections*.json",
+		"network.dns_cache":       "network.dns_cache*.json",
+		"filesystem.recent_files": "filesystem.recent_files*.json",
+		"filesystem.bash_history": "filesystem.bash_history*.json",
+		"registry.run_keys":       "registry.run_keys*.json",
+		"log.auth":                "log.auth*.json",
+		"users.logged_in":         "users.logged_in*.json",
 	}
 
 	pattern, ok := sourceFiles[source]
 	if !ok {
 		// Try as direct file pattern
-		pattern = source + "_*.json"
+		pattern = source + "*.json"
 	}
 
 	// Find matching files
@@ -168,7 +169,14 @@ func (e *Executor) evaluateExpression(record map[string]interface{}, expr Expres
 
 // evaluateComparison evaluates a comparison expression
 func (e *Executor) evaluateComparison(record map[string]interface{}, c *ComparisonExpr) bool {
+	// Handle nested data structure (collector.Result wraps data in "data" field)
 	value, exists := record[c.Left]
+	if !exists {
+		// Try nested "data" field
+		if data, ok := record["data"].(map[string]interface{}); ok {
+			value, exists = data[c.Left]
+		}
+	}
 	if !exists {
 		return false
 	}
@@ -199,6 +207,12 @@ func (e *Executor) evaluateComparison(record map[string]interface{}, c *Comparis
 func (e *Executor) evaluateIn(record map[string]interface{}, c *InExpr) bool {
 	value, exists := record[c.Column]
 	if !exists {
+		// Try nested "data" field
+		if data, ok := record["data"].(map[string]interface{}); ok {
+			value, exists = data[c.Column]
+		}
+	}
+	if !exists {
 		return false
 	}
 
@@ -215,6 +229,12 @@ func (e *Executor) evaluateIn(record map[string]interface{}, c *InExpr) bool {
 // evaluateLike evaluates a LIKE expression
 func (e *Executor) evaluateLike(record map[string]interface{}, c *LikeExpr) bool {
 	value, exists := record[c.Column]
+	if !exists {
+		// Try nested "data" field
+		if data, ok := record["data"].(map[string]interface{}); ok {
+			value, exists = data[c.Column]
+		}
+	}
 	if !exists {
 		return false
 	}
@@ -454,4 +474,18 @@ func (e *Executor) formatTable(results []map[string]interface{}) (string, error)
 	}
 
 	return strings.Join(lines, "\n"), nil
+}
+
+// FormatResults formats results in the specified format
+func (e *Executor) FormatResults(results []map[string]interface{}, format string) (string, error) {
+	switch strings.ToLower(format) {
+	case "json":
+		return e.formatJSON(results)
+	case "csv":
+		return e.formatCSV(results)
+	case "table":
+		return e.formatTable(results)
+	default:
+		return e.formatTable(results)
+	}
 }

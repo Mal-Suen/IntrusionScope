@@ -151,7 +151,7 @@ func (c *RegistryServicesCollector) Collect(ctx context.Context, opts *Options) 
 			// Query service details
 			serviceRecord := c.queryServiceDetails(ctx, servicesKey+"\\"+serviceName)
 			if serviceRecord != nil {
-				*records = append(*records, *serviceRecord)
+				records = append(records, *serviceRecord)
 			}
 		}
 	}
@@ -484,7 +484,7 @@ func (c *RegistryUserAssistCollector) Collect(ctx context.Context, opts *Options
 			if strings.Contains(line, "REG_") {
 				fields := strings.Fields(line)
 				if len(fields) >= 3 {
-					*records = append(*records, Record{
+					records = append(records, Record{
 						Timestamp: time.Now(),
 						Source:    "userassist",
 						Data: map[string]interface{}{

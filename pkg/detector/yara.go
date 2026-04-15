@@ -4,7 +4,6 @@ package detector
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 )

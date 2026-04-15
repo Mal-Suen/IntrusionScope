@@ -31,6 +31,8 @@ type Options struct {
 	MaxFileSize int64             // maximum file size to collect
 	Parameters  map[string]string // artifact-specific parameters
 	Verbose     bool              // verbose output
+	DaysBack    int               // days to look back for recent files
+	TargetFiles []string          // specific files to process
 }
 
 // Result contains collection results

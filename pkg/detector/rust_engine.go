@@ -44,14 +44,15 @@ import (
 
 // RustEngine wraps the Rust detection engine
 type RustEngine struct {
-	handle unsafe.Pointer
+	handle C.EngineHandle
 }
 
 // IOCDefinition represents an IOC to load into the engine
 type IOCDefinition struct {
-	Type  string `json:"type"`  // hash, ip, domain, url
-	Value string `json:"value"` // The IOC value
-	Tag   string `json:"tag"`   // Optional tag
+	Type     string `json:"type"`     // hash, ip, domain, url
+	Value    string `json:"value"`    // The IOC value
+	Tag      string `json:"tag"`      // Optional tag
+	Severity int    `json:"severity"` // Optional severity (1-5)
 }
 
 // EngineMatch represents a detection match from the Rust engine

@@ -126,7 +126,7 @@ func (m *Manager) Build() error {
 }
 
 // Detect performs detection on content
-func (m *Manager) Detect(content string) (*DetectionResult, error) {
+func (m *Manager) Detect(content string) (*EngineResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -140,7 +140,7 @@ func (m *Manager) Detect(content string) (*DetectionResult, error) {
 }
 
 // DetectMap performs detection on a map
-func (m *Manager) DetectMap(data map[string]interface{}) (*DetectionResult, error) {
+func (m *Manager) DetectMap(data map[string]interface{}) (*EngineResult, error) {
 	content, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal data: %w", err)
@@ -149,9 +149,9 @@ func (m *Manager) DetectMap(data map[string]interface{}) (*DetectionResult, erro
 }
 
 // DetectProcess performs detection on process data
-func (m *Manager) DetectProcess(process map[string]interface{}) (*DetectionResult, error) {
+func (m *Manager) DetectProcess(process map[string]interface{}) (*EngineResult, error) {
 	// Check various process fields
-	var matches []DetectionMatch
+	var matches []EngineMatch
 
 	// Check exe path
 	if exe, ok := process["exe"].(string); ok {
@@ -177,12 +177,12 @@ func (m *Manager) DetectProcess(process map[string]interface{}) (*DetectionResul
 		}
 	}
 
-	return &DetectionResult{Matches: matches}, nil
+	return &EngineResult{Matches: matches}, nil
 }
 
 // DetectNetworkConnection performs detection on network connection data
-func (m *Manager) DetectNetworkConnection(conn map[string]interface{}) (*DetectionResult, error) {
-	var matches []DetectionMatch
+func (m *Manager) DetectNetworkConnection(conn map[string]interface{}) (*EngineResult, error) {
+	var matches []EngineMatch
 
 	// Check remote IP
 	if remoteIP, ok := conn["remote_ip"].(string); ok && remoteIP != "" {
@@ -200,12 +200,12 @@ func (m *Manager) DetectNetworkConnection(conn map[string]interface{}) (*Detecti
 		}
 	}
 
-	return &DetectionResult{Matches: matches}, nil
+	return &EngineResult{Matches: matches}, nil
 }
 
 // DetectFile performs detection on file data
-func (m *Manager) DetectFile(file map[string]interface{}) (*DetectionResult, error) {
-	var matches []DetectionMatch
+func (m *Manager) DetectFile(file map[string]interface{}) (*EngineResult, error) {
+	var matches []EngineMatch
 
 	// Check hashes
 	if hashes, ok := file["hashes"].(map[string]string); ok {
@@ -225,7 +225,7 @@ func (m *Manager) DetectFile(file map[string]interface{}) (*DetectionResult, err
 		}
 	}
 
-	return &DetectionResult{Matches: matches}, nil
+	return &EngineResult{Matches: matches}, nil
 }
 
 // GetIOCDatabase returns the IOC database
@@ -295,17 +295,17 @@ func (db *IOCDatabase) Add(ioc IOCDefinition) {
 }
 
 // Detect performs detection using the database
-func (db *IOCDatabase) Detect(content string) *DetectionResult {
+func (db *IOCDatabase) Detect(content string) *EngineResult {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
-	var matches []DetectionMatch
+	var matches []EngineMatch
 	contentLower := strings.ToLower(content)
 
 	// Check hashes
 	for value, ioc := range db.hashes {
 		if strings.Contains(contentLower, value) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "hash",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -317,7 +317,7 @@ func (db *IOCDatabase) Detect(content string) *DetectionResult {
 	// Check IPs
 	for value, ioc := range db.ips {
 		if strings.Contains(content, value) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "ip",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -329,7 +329,7 @@ func (db *IOCDatabase) Detect(content string) *DetectionResult {
 	// Check domains
 	for value, ioc := range db.domains {
 		if strings.Contains(contentLower, value) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "domain",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -341,7 +341,7 @@ func (db *IOCDatabase) Detect(content string) *DetectionResult {
 	// Check URLs
 	for value, ioc := range db.urls {
 		if strings.Contains(contentLower, value) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "url",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -350,7 +350,7 @@ func (db *IOCDatabase) Detect(content string) *DetectionResult {
 		}
 	}
 
-	return &DetectionResult{Matches: matches}
+	return &EngineResult{Matches: matches}
 }
 
 // Stats returns statistics about the IOC database

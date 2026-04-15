@@ -1,5 +1,3 @@
-// +build cgo
-
 // Package detector provides threat detection capabilities
 // This file contains the Rust engine integration via CGO
 package detector
@@ -56,18 +54,18 @@ type IOCDefinition struct {
 	Tag   string `json:"tag"`   // Optional tag
 }
 
-// DetectionMatch represents a detection result
-type DetectionMatch struct {
+// EngineMatch represents a detection match from the Rust engine
+type EngineMatch struct {
 	IOCType  string `json:"ioc_type"`
 	Value    string `json:"value"`
 	Tag      string `json:"tag"`
 	Severity int    `json:"severity"`
 }
 
-// DetectionResult represents the result of a detection operation
-type DetectionResult struct {
-	Matches []DetectionMatch `json:"matches"`
-	Error   string           `json:"error,omitempty"`
+// EngineResult represents the result of a detection operation
+type EngineResult struct {
+	Matches []EngineMatch `json:"matches"`
+	Error   string        `json:"error,omitempty"`
 }
 
 // NewRustEngine creates a new Rust detection engine
@@ -160,7 +158,7 @@ func (e *RustEngine) Build() error {
 }
 
 // Detect performs detection on the given content
-func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
+func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	if e.handle == nil {
 		return nil, fmt.Errorf("engine not initialized")
 	}
@@ -170,21 +168,21 @@ func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
 
 	result := C.engine_detect_json(e.handle, cContent)
 	if result == nil {
-		return &DetectionResult{Matches: []DetectionMatch{}}, nil
+		return &EngineResult{Matches: []EngineMatch{}}, nil
 	}
 	defer C.free(unsafe.Pointer(result))
 
 	resultStr := C.GoString(result)
-	var detectionResult DetectionResult
-	if err := json.Unmarshal([]byte(resultStr), &detectionResult); err != nil {
+	var engineResult EngineResult
+	if err := json.Unmarshal([]byte(resultStr), &engineResult); err != nil {
 		return nil, fmt.Errorf("failed to parse detection result: %w", err)
 	}
 
-	return &detectionResult, nil
+	return &engineResult, nil
 }
 
 // DetectMap performs detection on a map of data
-func (e *RustEngine) DetectMap(data map[string]interface{}) (*DetectionResult, error) {
+func (e *RustEngine) DetectMap(data map[string]interface{}) (*EngineResult, error) {
 	// Convert map to JSON string for detection
 	content, err := json.Marshal(data)
 	if err != nil {
@@ -195,7 +193,7 @@ func (e *RustEngine) DetectMap(data map[string]interface{}) (*DetectionResult, e
 }
 
 // DetectString performs detection on a string
-func (e *RustEngine) DetectString(content string) (*DetectionResult, error) {
+func (e *RustEngine) DetectString(content string) (*EngineResult, error) {
 	return e.Detect(content)
 }
 
@@ -217,7 +215,7 @@ func (e *RustEngine) AddPatterns(patterns map[string]string) error {
 }
 
 // QuickDetect is a convenience method that creates an engine, loads IOCs, and detects
-func QuickDetect(content string, iocs []IOCDefinition) (*DetectionResult, error) {
+func QuickDetect(content string, iocs []IOCDefinition) (*EngineResult, error) {
 	engine, err := NewRustEngine()
 	if err != nil {
 		return nil, err
@@ -237,7 +235,7 @@ func QuickDetect(content string, iocs []IOCDefinition) (*DetectionResult, error)
 }
 
 // DetectHashes checks if any hash matches known bad hashes
-func (e *RustEngine) DetectHashes(hashes map[string]string) (*DetectionResult, error) {
+func (e *RustEngine) DetectHashes(hashes map[string]string) (*EngineResult, error) {
 	var iocs []IOCDefinition
 	for hashType, hashValue := range hashes {
 		iocs = append(iocs, IOCDefinition{
@@ -268,19 +266,19 @@ func (e *RustEngine) DetectHashes(hashes map[string]string) (*DetectionResult, e
 }
 
 // DetectIPs checks if any IP addresses match known bad IPs
-func (e *RustEngine) DetectIPs(ips []string) (*DetectionResult, error) {
+func (e *RustEngine) DetectIPs(ips []string) (*EngineResult, error) {
 	content := strings.Join(ips, "\n")
 	return e.Detect(content)
 }
 
 // DetectDomains checks if any domains match known bad domains
-func (e *RustEngine) DetectDomains(domains []string) (*DetectionResult, error) {
+func (e *RustEngine) DetectDomains(domains []string) (*EngineResult, error) {
 	content := strings.Join(domains, "\n")
 	return e.Detect(content)
 }
 
 // DetectURLs checks if any URLs match known bad URLs
-func (e *RustEngine) DetectURLs(urls []string) (*DetectionResult, error) {
+func (e *RustEngine) DetectURLs(urls []string) (*EngineResult, error) {
 	content := strings.Join(urls, "\n")
 	return e.Detect(content)
 }

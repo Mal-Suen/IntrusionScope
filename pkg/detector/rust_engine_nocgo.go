@@ -1,4 +1,4 @@
-// +build !cgo
+//go:build !cgo
 
 // Package detector provides threat detection capabilities
 // This file contains a pure Go fallback when CGO is not available
@@ -69,18 +69,18 @@ func (e *RustEngine) Build() error {
 }
 
 // Detect performs detection on the given content
-func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
+func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	if !e.built {
 		return nil, fmt.Errorf("engine not built, call Build() first")
 	}
 
-	var matches []DetectionMatch
+	var matches []EngineMatch
 	contentLower := strings.ToLower(content)
 
 	// Check hash IOCs
 	for _, ioc := range e.iocs["hash"] {
 		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "hash",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -92,7 +92,7 @@ func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
 	// Check IP IOCs
 	for _, ioc := range e.iocs["ip"] {
 		if strings.Contains(content, ioc.Value) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "ip",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -104,7 +104,7 @@ func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
 	// Check domain IOCs
 	for _, ioc := range e.iocs["domain"] {
 		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "domain",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -116,7 +116,7 @@ func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
 	// Check URL IOCs
 	for _, ioc := range e.iocs["url"] {
 		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "url",
 				Value:    ioc.Value,
 				Tag:      ioc.Tag,
@@ -128,7 +128,7 @@ func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
 	// Check patterns
 	for pattern, tag := range e.patterns {
 		if strings.Contains(contentLower, strings.ToLower(pattern)) {
-			matches = append(matches, DetectionMatch{
+			matches = append(matches, EngineMatch{
 				IOCType:  "pattern",
 				Value:    pattern,
 				Tag:      tag,
@@ -137,11 +137,11 @@ func (e *RustEngine) Detect(content string) (*DetectionResult, error) {
 		}
 	}
 
-	return &DetectionResult{Matches: matches}, nil
+	return &EngineResult{Matches: matches}, nil
 }
 
 // DetectMap performs detection on a map of data
-func (e *RustEngine) DetectMap(data map[string]interface{}) (*DetectionResult, error) {
+func (e *RustEngine) DetectMap(data map[string]interface{}) (*EngineResult, error) {
 	content, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal data: %w", err)
@@ -150,7 +150,7 @@ func (e *RustEngine) DetectMap(data map[string]interface{}) (*DetectionResult, e
 }
 
 // DetectString performs detection on a string
-func (e *RustEngine) DetectString(content string) (*DetectionResult, error) {
+func (e *RustEngine) DetectString(content string) (*EngineResult, error) {
 	return e.Detect(content)
 }
 
@@ -168,7 +168,7 @@ func (e *RustEngine) AddPatterns(patterns map[string]string) error {
 }
 
 // QuickDetect is a convenience method that creates an engine, loads IOCs, and detects
-func QuickDetect(content string, iocs []IOCDefinition) (*DetectionResult, error) {
+func QuickDetect(content string, iocs []IOCDefinition) (*EngineResult, error) {
 	engine, err := NewRustEngine()
 	if err != nil {
 		return nil, err
@@ -188,25 +188,25 @@ func QuickDetect(content string, iocs []IOCDefinition) (*DetectionResult, error)
 }
 
 // DetectHashes checks if any hash matches known bad hashes
-func (e *RustEngine) DetectHashes(hashes map[string]string) (*DetectionResult, error) {
+func (e *RustEngine) DetectHashes(hashes map[string]string) (*EngineResult, error) {
 	content, _ := json.Marshal(hashes)
 	return e.Detect(string(content))
 }
 
 // DetectIPs checks if any IP addresses match known bad IPs
-func (e *RustEngine) DetectIPs(ips []string) (*DetectionResult, error) {
+func (e *RustEngine) DetectIPs(ips []string) (*EngineResult, error) {
 	content := strings.Join(ips, "\n")
 	return e.Detect(content)
 }
 
 // DetectDomains checks if any domains match known bad domains
-func (e *RustEngine) DetectDomains(domains []string) (*DetectionResult, error) {
+func (e *RustEngine) DetectDomains(domains []string) (*EngineResult, error) {
 	content := strings.Join(domains, "\n")
 	return e.Detect(content)
 }
 
 // DetectURLs checks if any URLs match known bad URLs
-func (e *RustEngine) DetectURLs(urls []string) (*DetectionResult, error) {
+func (e *RustEngine) DetectURLs(urls []string) (*EngineResult, error) {
 	content := strings.Join(urls, "\n")
 	return e.Detect(content)
 }

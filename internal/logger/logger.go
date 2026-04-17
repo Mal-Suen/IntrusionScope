@@ -119,15 +119,23 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// Build entry with base fields
 	entry := map[string]interface{}{
 		"timestamp": time.Now().Format(time.RFC3339),
 		"level":     level.String(),
-		"message":   fmt.Sprintf(msg, args...),
+		"message":   msg,
 	}
 
-	// Add fields
+	// Add existing fields
 	for k, v := range l.fields {
 		entry[k] = v
+	}
+
+	// Process args as key-value pairs (must be even number)
+	for i := 0; i < len(args)-1; i += 2 {
+		if key, ok := args[i].(string); ok {
+			entry[key] = args[i+1]
+		}
 	}
 
 	if l.format == "json" {

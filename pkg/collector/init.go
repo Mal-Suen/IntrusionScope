@@ -12,12 +12,15 @@ func init() {
 	registry.Register(&ProcessListCollector{})
 	registry.Register(&ProcessTreeCollector{})
 	registry.Register(&ProcessOpenFilesCollector{})
+	registry.Register(&ProcessMemoryCollector{})
+	registry.Register(&ProcessModulesCollector{})
 
 	// Network collectors
 	registry.Register(&NetworkConnectionsCollector{})
 	registry.Register(&DNSCacheCollector{})
 	registry.Register(&ListeningPortsCollector{})
 	registry.Register(&ArpCacheCollector{})
+	registry.Register(&HostsFileCollector{})
 
 	// Filesystem collectors
 	registry.Register(&FilesystemRecentFilesCollector{})
@@ -25,6 +28,9 @@ func init() {
 	registry.Register(&FilesystemCronJobsCollector{})
 	registry.Register(&FilesystemScheduledTasksCollector{})
 	registry.Register(&FilesystemSystemdServicesCollector{})
+	registry.Register(&FilesystemBashHistoryCollector{})
+	registry.Register(&FilesystemSuidFilesCollector{})
+	registry.Register(&FilesystemAutorunsCollector{})
 
 	// User collectors
 	registry.Register(&LoggedInUsersCollector{})
@@ -36,12 +42,20 @@ func init() {
 		registry.Register(&RegistryRunKeysCollector{})
 		registry.Register(&RegistryServicesCollector{})
 		registry.Register(&RegistryPersistenceCollector{})
+		registry.Register(&RegistryUSBHistoryCollector{})
+		registry.Register(&RegistryUserAssistCollector{})
+		registry.Register(&RegistryStartupCollector{})
+		registry.Register(&RegistrySoftwareCollector{})
 	}
 
 	// Log collectors
 	registry.Register(&LogAuthCollector{})
-	registry.Register(&LogWindowsEventCollector{})
 	registry.Register(&LogSyslogCollector{})
+	registry.Register(&LogWtmpCollector{})
+	registry.Register(&LogAuditCollector{})
+	registry.Register(&LogJournalCollector{})
+	registry.Register(&LogWindowsEventCollector{})
+	registry.Register(&LogWebServerCollector{})
 }
 
 // Global registry instance

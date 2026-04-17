@@ -21,6 +21,7 @@ go.work
 build/
 dist/
 intrusionscope
+intrusionscope_linux
 
 # IDE
 .idea/
@@ -43,8 +44,17 @@ configs/secrets.*
 
 # Test output
 test_output/
+test_intrusion/
+test_intrusion2/
+test_intrusion3/
+test_linux/
+test_linux2/
+test_linux3/
 *.test.json
 
 # Temporary files
 tmp/
 temp/
+
+# Remote execution scripts (development)
+remote_exec.py

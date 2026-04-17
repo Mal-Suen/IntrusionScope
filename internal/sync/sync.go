@@ -837,6 +837,7 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 	_, err = io.Copy(out, resp.Body)
 	out.Close()
 	if err != nil {
+		os.Remove(zipPath)
 		return err
 	}
 
@@ -851,7 +852,9 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 	defer r.Close()
 
 	// Create destination directory
-	os.MkdirAll(dest, 0755)
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
 
 	for _, f := range r.File {
 		// Skip directories
@@ -883,7 +886,10 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 		dstPath := filepath.Join(dest, relPath)
 
 		// Create parent directories
-		os.MkdirAll(filepath.Dir(dstPath), 0755)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			rc.Close()
+			continue
+		}
 
 		// Create and write file
 		dstFile, err := os.Create(dstPath)
@@ -892,9 +898,12 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 			continue
 		}
 
-		io.Copy(dstFile, rc)
+		_, err = io.Copy(dstFile, rc)
 		dstFile.Close()
 		rc.Close()
+		if err != nil {
+			os.Remove(dstPath)
+		}
 	}
 
 	r.Close()

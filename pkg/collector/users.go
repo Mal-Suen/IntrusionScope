@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -84,12 +86,89 @@ func (c *LoggedInUsersCollector) collectLinux() []Record {
 func (c *LoggedInUsersCollector) collectWindows() []Record {
 	var records []Record
 
-	// TODO: Use Windows API (NetWkstaUserEnum)
+	// Use 'query user' command to get logged in users
+	cmd := exec.Command("query", "user")
+	output, err := cmd.Output()
+	if err != nil {
+		// Fallback: try 'whoami' for current user
+		records = c.collectWindowsFallback()
+		return records
+	}
+
+	// Parse output:
+	// 用户名                会话名             ID  状态    空闲时间   登录时间
+	// >malco                 console             1  运行中      无     2026/4/16 10:47
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	lineNum := 0
+
+	// Regex to parse the line
+	// Format: [>]username session id status idle logonTime
+	lineRegex := regexp.MustCompile(`^([> ])?(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.+)$`)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineNum++
+
+		// Skip header line
+		if lineNum == 1 || strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		matches := lineRegex.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+
+		record := Record{
+			Timestamp: time.Now(),
+			Source:    "query_user",
+			Data: map[string]interface{}{
+				"username":     matches[2],
+				"session_name": matches[3],
+				"session_id":   matches[4],
+				"status":       matches[5],
+				"idle_time":    matches[6],
+				"logon_time":   matches[7],
+				"current":      matches[1] == ">",
+			},
+		}
+		records = append(records, record)
+	}
+
+	return records
+}
+
+func (c *LoggedInUsersCollector) collectWindowsFallback() []Record {
+	var records []Record
+
+	// Use whoami to get current user
+	cmd := exec.Command("whoami")
+	output, err := cmd.Output()
+	if err != nil {
+		return records
+	}
+
+	username := strings.TrimSpace(string(output))
+	if username == "" {
+		return records
+	}
+
+	// Split domain\user if present
+	parts := strings.Split(username, "\\")
+	user := username
+	domain := ""
+	if len(parts) == 2 {
+		domain = parts[0]
+		user = parts[1]
+	}
+
 	records = append(records, Record{
 		Timestamp: time.Now(),
-		Source:    "windows_api",
+		Source:    "whoami",
 		Data: map[string]interface{}{
-			"message": "Windows logged in users requires Windows API implementation",
+			"username": user,
+			"domain":   domain,
+			"current":  true,
 		},
 	})
 

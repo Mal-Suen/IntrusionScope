@@ -308,8 +308,16 @@ func (e *Executor) selectColumns(records []map[string]interface{}, columns []str
 	for _, record := range records {
 		newRecord := make(map[string]interface{})
 		for _, col := range columns {
+			// First try top-level field
 			if val, exists := record[col]; exists {
 				newRecord[col] = val
+				continue
+			}
+			// Then try nested "data" field (collector.Result wraps data in "data" field)
+			if data, ok := record["data"].(map[string]interface{}); ok {
+				if val, exists := data[col]; exists {
+					newRecord[col] = val
+				}
 			}
 		}
 		result = append(result, newRecord)
@@ -330,10 +338,23 @@ func (e *Executor) applyOrderBy(records []map[string]interface{}, orderBy, order
 
 	descending := strings.ToUpper(orderDir) == "DESC"
 
+	// Helper to get value from record (handles nested "data" field)
+	getValue := func(record map[string]interface{}, key string) string {
+		if val, exists := record[key]; exists {
+			return fmt.Sprintf("%v", val)
+		}
+		if data, ok := record["data"].(map[string]interface{}); ok {
+			if val, exists := data[key]; exists {
+				return fmt.Sprintf("%v", val)
+			}
+		}
+		return ""
+	}
+
 	for i := 0; i < len(result)-1; i++ {
 		for j := 0; j < len(result)-i-1; j++ {
-			aVal := fmt.Sprintf("%v", result[j][orderBy])
-			bVal := fmt.Sprintf("%v", result[j+1][orderBy])
+			aVal := getValue(result[j], orderBy)
+			bVal := getValue(result[j+1], orderBy)
 
 			cmp := e.compareNumbers(aVal, bVal)
 			shouldSwap := false

@@ -103,22 +103,28 @@ func (l *Library) Remove(id string) {
 	delete(l.signatures, id)
 
 	// Remove from indexes
-	l.removeFromSlice(&l.byType[sig.Type], id)
+	if slice, ok := l.byType[sig.Type]; ok {
+		l.byType[sig.Type] = l.removeFromSliceValue(slice, id)
+	}
 	for _, tag := range sig.Tags {
-		l.removeFromSlice(&l.byTag[tag], id)
+		if slice, ok := l.byTag[tag]; ok {
+			l.byTag[tag] = l.removeFromSliceValue(slice, id)
+		}
 	}
 	if sig.Source != "" {
-		l.removeFromSlice(&l.bySource[sig.Source], id)
+		if slice, ok := l.bySource[sig.Source]; ok {
+			l.bySource[sig.Source] = l.removeFromSliceValue(slice, id)
+		}
 	}
 }
 
-func (l *Library) removeFromSlice(slice *[]string, id string) {
-	for i, s := range *slice {
+func (l *Library) removeFromSliceValue(slice []string, id string) []string {
+	for i, s := range slice {
 		if s == id {
-			*slice = append((*slice)[:i], (*slice)[i+1:]...)
-			return
+			return append(slice[:i], slice[i+1:]...)
 		}
 	}
+	return slice
 }
 
 // List returns all signature IDs

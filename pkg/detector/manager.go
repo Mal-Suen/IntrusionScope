@@ -262,20 +262,26 @@ func (m *Manager) AddPatterns(patterns map[string]int) error {
 
 // IOCDatabase is a simple in-memory IOC database
 type IOCDatabase struct {
-	mu      sync.RWMutex
-	hashes  map[string]IOCDefinition
-	ips     map[string]IOCDefinition
-	domains map[string]IOCDefinition
-	urls    map[string]IOCDefinition
+	mu        sync.RWMutex
+	hashes    map[string]IOCDefinition
+	ips       map[string]IOCDefinition
+	domains   map[string]IOCDefinition
+	urls      map[string]IOCDefinition
+	processes map[string]IOCDefinition
+	paths     map[string]IOCDefinition
+	ports     map[string]IOCDefinition
 }
 
 // NewIOCDatabase creates a new IOC database
 func NewIOCDatabase() *IOCDatabase {
 	return &IOCDatabase{
-		hashes:  make(map[string]IOCDefinition),
-		ips:     make(map[string]IOCDefinition),
-		domains: make(map[string]IOCDefinition),
-		urls:    make(map[string]IOCDefinition),
+		hashes:    make(map[string]IOCDefinition),
+		ips:       make(map[string]IOCDefinition),
+		domains:   make(map[string]IOCDefinition),
+		urls:      make(map[string]IOCDefinition),
+		processes: make(map[string]IOCDefinition),
+		paths:     make(map[string]IOCDefinition),
+		ports:     make(map[string]IOCDefinition),
 	}
 }
 
@@ -296,6 +302,12 @@ func (db *IOCDatabase) Add(ioc IOCDefinition) {
 		db.domains[iocValue] = ioc
 	case "url":
 		db.urls[iocValue] = ioc
+	case "process":
+		db.processes[iocValue] = ioc
+	case "path":
+		db.paths[iocValue] = ioc
+	case "port":
+		db.ports[iocValue] = ioc
 	}
 }
 
@@ -355,7 +367,171 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
+	// Check processes
+	for value, ioc := range db.processes {
+		if strings.Contains(contentLower, value) {
+			matches = append(matches, EngineMatch{
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
+			})
+		}
+	}
+
+	// Check paths
+	for value, ioc := range db.paths {
+		if strings.Contains(contentLower, value) {
+			matches = append(matches, EngineMatch{
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
+			})
+		}
+	}
+
+	// Check ports
+	for value, ioc := range db.ports {
+		if strings.Contains(content, ":"+value) || strings.Contains(content, value) {
+			matches = append(matches, EngineMatch{
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
+			})
+		}
+	}
+
+	// Check for suspicious command patterns
+	matches = append(matches, db.detectSuspiciousPatterns(content, contentLower)...)
+
 	return &EngineResult{Matches: matches}
+}
+
+// detectSuspiciousPatterns detects suspicious command patterns
+func (db *IOCDatabase) detectSuspiciousPatterns(content, contentLower string) []EngineMatch {
+	var matches []EngineMatch
+
+	// Suspicious command patterns
+	patterns := []struct {
+		pattern     string
+		id          string
+		name        string
+		severity    int
+		description string
+	}{
+		// PowerShell attacks
+		{"powershell -enc", "ps_encode", "Encoded PowerShell Command", 4, "PowerShell with encoded command - often used for obfuscation"},
+		{"powershell -e ", "ps_encode2", "Encoded PowerShell Command", 4, "PowerShell with encoded command"},
+		{"powershell -windowstyle hidden", "ps_hidden", "Hidden PowerShell Window", 4, "PowerShell running in hidden window"},
+		{"-executionpolicy bypass", "ps_bypass", "PowerShell Execution Policy Bypass", 3, "Bypassing PowerShell security"},
+		{"-ep bypass", "ps_bypass2", "PowerShell Execution Policy Bypass", 3, "Bypassing PowerShell security"},
+		{"downloadstring(", "ps_download", "PowerShell Download", 3, "PowerShell downloading content"},
+		{"downloadfile(", "ps_download2", "PowerShell File Download", 3, "PowerShell downloading file"},
+		{"iex(", "ps_iex", "PowerShell Invoke Expression", 3, "Dynamic code execution"},
+		{"iex (", "ps_iex2", "PowerShell Invoke Expression", 3, "Dynamic code execution"},
+		{"invoke-webrequest", "ps_iwr", "PowerShell Web Request", 2, "PowerShell making web request"},
+		{"invoke-expression", "ps_invoke", "PowerShell Invoke Expression", 3, "Dynamic code execution"},
+
+		// Credential theft
+		{"sekurlsa::logonpasswords", "mimikatz_logonpwd", "Mimikatz Credential Dump", 5, "Mimikatz extracting credentials"},
+		{"sekurlsa::", "mimikatz_sekurlsa", "Mimikatz Sekurlsa Module", 5, "Mimikatz credential operations"},
+		{"lsadump::", "mimikatz_lsadump", "Mimikatz LSA Dump", 5, "Mimikatz LSA operations"},
+		{"privilege::debug", "mimikatz_debug", "Mimikatz Debug Privilege", 5, "Mimikatz requesting debug privilege"},
+		{"kerberos::", "mimikatz_kerberos", "Mimikatz Kerberos Attack", 5, "Mimikatz Kerberos operations"},
+		{"procdump -ma", "procdump_full", "Full Process Dump", 4, "Creating full process memory dump"},
+		{"procdump ", "procdump", "Process Dump Tool", 3, "Process dump execution"},
+
+		// Living off the land binaries (LOLBins)
+		{"certutil -urlcache", "lolbin_certutil", "Certutil Download", 4, "Using certutil to download files"},
+		{"certutil -split", "lolbin_certutil2", "Certutil Split", 3, "Certutil file operations"},
+		{"bitsadmin /transfer", "lolbin_bitsadmin", "BITSAdmin Download", 3, "Using BITS for download"},
+		{"bitsadmin /create", "lolbin_bitsadmin2", "BITSAdmin Job", 2, "BITS job creation"},
+		{"mshta vbscript", "lolbin_mshta", "MSHTA VBScript Execution", 4, "MSHTA executing VBScript"},
+		{"mshta http", "lolbin_mshta2", "MSHTA Remote Execution", 4, "MSHTA executing remote content"},
+		{"regsvr32 /i:http", "lolbin_regsvr32", "Regsvr32 Remote Execution", 4, "Regsvr32 executing remote script"},
+		{"regsvr32 /i:https", "lolbin_regsvr32_2", "Regsvr32 Remote Execution", 4, "Regsvr32 executing remote script"},
+		{"rundll32.exe javascript:", "lolbin_rundll32", "Rundll32 JavaScript", 4, "Rundll32 executing JavaScript"},
+		{"wmic process call create", "lolbin_wmic", "WMIC Process Creation", 3, "WMIC creating process"},
+		{"msiexec /i http", "lolbin_msiexec", "MSIExec Remote Install", 3, "MSIExec installing from remote"},
+
+		// Persistence mechanisms
+		{"currentversion\\\\run", "persist_run", "Run Key Modification", 4, "注册表Run键持久化"},
+		{"currentversion\\run", "persist_run2", "Run Key Modification", 4, "注册表Run键持久化"},
+		{"schtasks /create", "persist_schtasks", "Scheduled Task Creation", 3, "Creating scheduled task"},
+		{"sc create", "persist_service", "Service Creation", 3, "Creating Windows service"},
+
+		// Reconnaissance
+		{"whoami /all", "recon_whoami", "User Privilege Recon", 2, "Enumerating user privileges"},
+		{"net user ", "recon_netuser", "User Enumeration", 2, "Enumerating users"},
+		{"net localgroup ", "recon_localgroup", "Group Enumeration", 2, "Enumerating local groups"},
+		{"net group ", "recon_group", "Domain Group Enumeration", 3, "Enumerating domain groups"},
+		{"net view ", "recon_netview", "Network Recon", 2, "Network enumeration"},
+		{"nltest /domain_trusts", "recon_trusts", "Domain Trust Recon", 3, "Enumerating domain trusts"},
+		{"dsquery ", "recon_dsquery", "AD Recon", 3, "Active Directory enumeration"},
+		{"bloodhound", "recon_bloodhound", "BloodHound Execution", 4, "AD reconnaissance tool"},
+
+		// Lateral movement
+		{"psexec ", "lateral_psexec", "PsExec Execution", 3, "Remote execution via PsExec"},
+		{"wmic /node:", "lateral_wmic", "WMIC Remote Execution", 3, "Remote WMI execution"},
+		{"enter-pssession", "lateral_pssession", "PowerShell Remote Session", 2, "Remote PowerShell session"},
+		{"invoke-command", "lateral_invoke", "PowerShell Remote Command", 2, "Remote PowerShell command"},
+		{"winrs ", "lateral_winrs", "WinRS Remote Execution", 3, "Remote execution via WinRS"},
+
+		// Defense evasion
+		{"wevtutil cl", "evasion_clearlog", "Event Log Clearing", 4, "Clearing Windows event logs"},
+		{"clear-eventlog", "evasion_psclearlog", "PowerShell Log Clearing", 4, "Clearing event logs via PowerShell"},
+		{"auditpol /clear", "evasion_auditpol", "Audit Policy Clear", 4, "Clearing audit policy"},
+		{"sc delete ", "evasion_scdelete", "Service Deletion", 3, "Deleting Windows service"},
+		{"taskkill /f", "evasion_taskkill", "Force Kill Process", 2, "Forcefully killing process"},
+		{"netsh advfirewall set allprofiles state off", "evasion_firewall", "Firewall Disabled", 4, "Disabling Windows firewall"},
+		{"netsh firewall set opmode disable", "evasion_firewall2", "Firewall Disabled", 4, "Disabling Windows firewall"},
+
+		// Data exfiltration
+		{"ftp -s:", "exfil_ftp", "FTP Script Execution", 3, "FTP with script file"},
+		{"curl -o", "exfil_curl", "Curl Download", 2, "Downloading with curl"},
+		{"wget ", "exfil_wget", "Wget Download", 2, "Downloading with wget"},
+
+		// Account manipulation
+		{"/add", "account_add", "User Account Creation", 3, "Creating new user account"},
+		{"net localgroup administrators", "account_admin", "Admin Group Modification", 4, "Modifying administrators group"},
+		{"/delete", "account_delete", "User Account Deletion", 3, "Deleting user account"},
+
+		// Suspicious file locations
+		{"\\temp\\", "susp_path_temp", "Temp Directory Execution", 2, "Executing from temp directory"},
+		{"\\users\\public\\", "susp_path_public", "Public Directory Execution", 3, "Executing from public directory"},
+		{"\\appdata\\local\\temp\\", "susp_path_appdata", "AppData Temp Execution", 2, "Executing from AppData temp"},
+		{"\\\\temp\\\\", "susp_path_temp2", "Temp Directory Execution", 2, "Executing from temp directory"},
+		{"\\\\users\\\\public\\\\", "susp_path_public2", "Public Directory Execution", 3, "Executing from public directory"},
+
+		// Suspicious script execution
+		{"wscript ", "susp_wscript", "WScript Execution", 2, "Windows Script Host execution"},
+		{"cscript ", "susp_cscript", "CScript Execution", 2, "Console Script Host execution"},
+		{".vbs", "susp_vbs", "VBScript File", 2, "VBScript file execution"},
+		{"rundll32.exe ", "susp_rundll32", "Rundll32 Execution", 2, "Rundll32 loading DLL"},
+
+		// Reverse shell indicators
+		{"nc.exe ", "revshell_nc", "Netcat Execution", 4, "Netcat - potential reverse shell"},
+		{"ncat ", "revshell_ncat", "Ncat Execution", 4, "Ncat - potential reverse shell"},
+		{"-e /bin", "revshell_bin", "Potential Reverse Shell", 4, "Shell execution flag"},
+		{"-e cmd", "revshell_cmd", "Potential Reverse Shell", 4, "Shell execution flag"},
+		{":4444", "revshell_port", "Common Shell Port", 3, "Common reverse shell port"},
+		{":5555", "revshell_port2", "Common Shell Port", 3, "Common reverse shell port"},
+	}
+
+	for _, p := range patterns {
+		if strings.Contains(contentLower, p.pattern) {
+			matches = append(matches, EngineMatch{
+				SignatureID:   p.id,
+				SignatureName: p.name,
+				Severity:      p.severity,
+				Details:       map[string]string{"ioc_type": "behavioral", "pattern": p.pattern, "description": p.description},
+			})
+		}
+	}
+
+	return matches
 }
 
 // Stats returns statistics about the IOC database

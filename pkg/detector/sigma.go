@@ -149,30 +149,32 @@ func (d *SigmaDetector) matchRule(rule *SigmaRule, record Record) bool {
 // evaluateCondition parses and evaluates a Sigma condition expression
 // Supports: selection1, selection1 and selection2, selection1 or selection2,
 // 1 of them, all of them, count(selection) > N
+// Operator precedence: NOT > AND > OR (standard boolean precedence)
 func (d *SigmaDetector) evaluateCondition(condition string, selections map[string]interface{}, data map[string]interface{}) bool {
 	condition = strings.TrimSpace(condition)
 	condition = strings.ToLower(condition)
 
-	// Handle "and" operator (lower precedence than "or")
-	if strings.Contains(condition, " and ") {
-		parts := strings.Split(condition, " and ")
-		for _, part := range parts {
-			if !d.evaluateCondition(part, selections, data) {
-				return false
-			}
-		}
-		return true
-	}
-
-	// Handle "or" operator
+	// Handle "or" operator first (lowest precedence)
+	// This ensures "a or b and c" is parsed as "a or (b and c)"
 	if strings.Contains(condition, " or ") {
-		parts := strings.Split(condition, " or ")
+		parts := splitByOperator(condition, " or ")
 		for _, part := range parts {
 			if d.evaluateCondition(part, selections, data) {
 				return true
 			}
 		}
 		return false
+	}
+
+	// Handle "and" operator (higher precedence than or)
+	if strings.Contains(condition, " and ") {
+		parts := splitByOperator(condition, " and ")
+		for _, part := range parts {
+			if !d.evaluateCondition(part, selections, data) {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Handle "N of them" pattern
@@ -444,4 +446,44 @@ func (d *SigmaDetector) levelToSeverity(level string) int {
 	default:
 		return SeverityInfo
 	}
+}
+
+// splitByOperator splits a condition string by an operator while respecting parentheses
+// This allows proper handling of nested expressions like "(a or b) and c"
+func splitByOperator(condition, op string) []string {
+	var result []string
+	var current strings.Builder
+	parenDepth := 0
+
+	// Scan through the condition character by character
+	i := 0
+	for i < len(condition) {
+		ch := condition[i]
+
+		switch ch {
+		case '(':
+			parenDepth++
+			current.WriteByte(ch)
+		case ')':
+			parenDepth--
+			current.WriteByte(ch)
+		default:
+			// Check if we're at the operator and not inside parentheses
+			if parenDepth == 0 && strings.HasPrefix(condition[i:], op) {
+				result = append(result, strings.TrimSpace(current.String()))
+				current.Reset()
+				i += len(op)
+				continue
+			}
+			current.WriteByte(ch)
+		}
+		i++
+	}
+
+	// Add the last part
+	if current.Len() > 0 {
+		result = append(result, strings.TrimSpace(current.String()))
+	}
+
+	return result
 }

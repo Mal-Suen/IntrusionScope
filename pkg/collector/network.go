@@ -174,7 +174,12 @@ func (c *NetworkConnectionsCollector) parseHexAddr(hexAddr string) (string, int)
 		// IPv4
 		ip := make(net.IP, 4)
 		for i := 0; i < 4; i++ {
-			b, _ := strconv.ParseInt(ipHex[6-2*i:8-2*i], 16, 32)
+			start := 6 - 2*i
+			end := 8 - 2*i
+			if start < 0 || end > len(ipHex) {
+				return "", int(port)
+			}
+			b, _ := strconv.ParseInt(ipHex[start:end], 16, 32)
 			ip[i] = byte(b)
 		}
 		return ip.String(), int(port)
@@ -182,7 +187,12 @@ func (c *NetworkConnectionsCollector) parseHexAddr(hexAddr string) (string, int)
 		// IPv6
 		ip := make(net.IP, 16)
 		for i := 0; i < 16; i++ {
-			b, _ := strconv.ParseInt(ipHex[30-2*i:32-2*i], 16, 32)
+			start := 30 - 2*i
+			end := 32 - 2*i
+			if start < 0 || end > len(ipHex) {
+				return "", int(port)
+			}
+			b, _ := strconv.ParseInt(ipHex[start:end], 16, 32)
 			ip[i] = byte(b)
 		}
 		return ip.String(), int(port)

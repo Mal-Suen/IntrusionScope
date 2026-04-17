@@ -109,9 +109,65 @@ func (d *IOCDetector) addIP(ip string, sig *Signature) {
 		return
 	}
 
-	// For simplicity, store in domain index for now
-	// TODO: Implement proper IP trie for CIDR matching
-	d.domainIndex[ip] = sig
+	// Store in ipIndex trie for proper IP/CIDR matching
+	if d.ipIndex != nil && d.ipIndex.root != nil {
+		d.ipIndex.addIP(parsedIP, sig)
+	}
+}
+
+// addIP adds an IP to the trie
+func (t *ipTrie) addIP(ip net.IP, sig *Signature) {
+	if t.root == nil {
+		return
+	}
+	// Convert IP to 4 or 16 bytes
+	ipBytes := ip.To4()
+	if ipBytes == nil {
+		ipBytes = ip.To16()
+	}
+	// Navigate/create path in trie
+	node := t.root
+	for _, b := range ipBytes {
+		if node.children == nil {
+			node.children = make(map[byte]*ipTrieNode)
+		}
+		if node.children[b] == nil {
+			node.children[b] = &ipTrieNode{children: make(map[byte]*ipTrieNode)}
+		}
+		node = node.children[b]
+	}
+	node.signature = sig
+}
+
+// findIP looks up an IP in the trie
+func (d *IOCDetector) findIP(ipStr string) *Signature {
+	if d.ipIndex == nil || d.ipIndex.root == nil {
+		return nil
+	}
+	parsedIP := net.ParseIP(ipStr)
+	if parsedIP == nil {
+		return nil
+	}
+	return d.ipIndex.findIP(parsedIP)
+}
+
+// findIP finds an IP in the trie
+func (t *ipTrie) findIP(ip net.IP) *Signature {
+	if t.root == nil {
+		return nil
+	}
+	ipBytes := ip.To4()
+	if ipBytes == nil {
+		ipBytes = ip.To16()
+	}
+	node := t.root
+	for _, b := range ipBytes {
+		if node.children == nil || node.children[b] == nil {
+			return nil
+		}
+		node = node.children[b]
+	}
+	return node.signature
 }
 
 func (d *IOCDetector) Detect(ctx context.Context, input *DetectionInput) (*DetectionResult, error) {
@@ -173,14 +229,14 @@ func (d *IOCDetector) detectRecord(record Record) []Match {
 		}
 	}
 
-	// Check IPs
+	// Check IPs - use ipIndex trie for proper matching
 	if ip, ok := record.Data["remote_ip"].(string); ok && ip != "" {
-		if sig, found := d.domainIndex[ip]; found {
+		if sig := d.findIP(ip); sig != nil {
 			matches = append(matches, d.createMatch(sig, "ip", ip))
 		}
 	}
 	if ip, ok := record.Data["local_ip"].(string); ok && ip != "" {
-		if sig, found := d.domainIndex[ip]; found {
+		if sig := d.findIP(ip); sig != nil {
 			matches = append(matches, d.createMatch(sig, "ip", ip))
 		}
 	}

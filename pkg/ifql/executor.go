@@ -261,6 +261,12 @@ func (e *Executor) evaluateLike(record map[string]interface{}, c *LikeExpr) bool
 func (e *Executor) evaluateBetween(record map[string]interface{}, c *BetweenExpr) bool {
 	value, exists := record[c.Column]
 	if !exists {
+		// Try nested "data" field (consistent with other evaluate functions)
+		if data, ok := record["data"].(map[string]interface{}); ok {
+			value, exists = data[c.Column]
+		}
+	}
+	if !exists {
 		return false
 	}
 
@@ -277,6 +283,12 @@ func (e *Executor) evaluateBetween(record map[string]interface{}, c *BetweenExpr
 // evaluateIsNull evaluates an IS NULL expression
 func (e *Executor) evaluateIsNull(record map[string]interface{}, c *IsNullExpr) bool {
 	value, exists := record[c.Column]
+	if !exists {
+		// Try nested "data" field (consistent with other evaluate functions)
+		if data, ok := record["data"].(map[string]interface{}); ok {
+			value, exists = data[c.Column]
+		}
+	}
 	if c.Not {
 		return exists && value != nil
 	}

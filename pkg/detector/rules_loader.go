@@ -240,41 +240,94 @@ func (l *YARALoader) LoadFromFile(path string) ([]YARARule, error) {
 func (l *YARALoader) Parse(content string) ([]YARARule, error) {
 	var rules []YARARule
 
-	// Simple YARA parser
+	// Parse YARA rules with proper brace matching
 	// Rule pattern: rule <name> [: <tags>] { ... }
-	rulePattern := regexp.MustCompile(`(?s)rule\s+(\w+)\s*(?::\s*([^\{]+))?\s*\{([^}]+)\}`)
-	matches := rulePattern.FindAllStringSubmatch(content, -1)
+	i := 0
+	for i < len(content) {
+		// Find "rule " keyword
+		ruleIdx := strings.Index(content[i:], "rule ")
+		if ruleIdx == -1 {
+			break
+		}
+		ruleStart := i + ruleIdx
+		i = ruleStart + 5 // Skip "rule "
 
-	for _, match := range matches {
-		if len(match) < 4 {
-			continue
+		// Skip whitespace
+		for i < len(content) && (content[i] == ' ' || content[i] == '\t' || content[i] == '\n') {
+			i++
 		}
 
-		rule := YARARule{
-			Name:  match[1],
-			Raw:   match[0],
-			Meta:  make(map[string]string),
+		// Extract rule name
+		nameStart := i
+		for i < len(content) && (isAlphaNum(content[i]) || content[i] == '_') {
+			i++
+		}
+		name := content[nameStart:i]
+
+		// Skip whitespace
+		for i < len(content) && (content[i] == ' ' || content[i] == '\t' || content[i] == '\n') {
+			i++
 		}
 
-		// Parse tags
-		if match[2] != "" {
-			tags := strings.Split(match[2], " ")
-			for _, tag := range tags {
-				tag = strings.TrimSpace(tag)
-				if tag != "" && tag != ":" {
-					rule.Tags = append(rule.Tags, strings.TrimSuffix(tag, ","))
+		// Parse optional tags (after colon)
+		var tags []string
+		if i < len(content) && content[i] == ':' {
+			i++
+			for i < len(content) && content[i] != '{' {
+				if content[i] == ' ' || content[i] == '\t' || content[i] == '\n' || content[i] == ',' {
+					i++
+					continue
+				}
+				tagStart := i
+				for i < len(content) && (isAlphaNum(content[i]) || content[i] == '_') {
+					i++
+				}
+				if i > tagStart {
+					tags = append(tags, content[tagStart:i])
 				}
 			}
 		}
 
+		// Find opening brace
+		braceIdx := strings.Index(content[i:], "{")
+		if braceIdx == -1 {
+			continue
+		}
+		i += braceIdx + 1
+
+		// Find matching closing brace with proper nesting
+		braceCount := 1
+		bodyStart := i
+		for i < len(content) && braceCount > 0 {
+			if content[i] == '{' {
+				braceCount++
+			} else if content[i] == '}' {
+				braceCount--
+			}
+			i++
+		}
+		bodyEnd := i - 1
+		body := content[bodyStart:bodyEnd]
+
+		rule := YARARule{
+			Name: name,
+			Raw:  content[ruleStart:i],
+			Meta: make(map[string]string),
+			Tags: tags,
+		}
+
 		// Parse rule body
-		body := match[3]
 		l.parseRuleBody(&rule, body)
 
 		rules = append(rules, rule)
 	}
 
 	return rules, nil
+}
+
+// isAlphaNum checks if a byte is alphanumeric
+func isAlphaNum(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
 }
 
 // parseRuleBody parses the body of a YARA rule

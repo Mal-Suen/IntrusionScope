@@ -1204,7 +1204,11 @@ func (m *Manager) syncBinaryDefense(ctx context.Context, src *Source) (added, up
 			continue
 		}
 		// Parse IP address
-		ip := strings.Fields(line)[0]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		ip := fields[0]
 		if ip != "" && !strings.Contains(ip, ":") {
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("bd_%s", strings.ReplaceAll(ip, ".", "_")),
@@ -1252,7 +1256,11 @@ func (m *Manager) syncCINSArmy(ctx context.Context, src *Source) (added, updated
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ip := strings.Fields(line)[0]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		ip := fields[0]
 		if ip != "" {
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("cins_%s", strings.ReplaceAll(ip, ".", "_")),
@@ -1300,7 +1308,11 @@ func (m *Manager) syncEmergingThreats(ctx context.Context, src *Source) (added, 
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ip := strings.Fields(line)[0]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		ip := fields[0]
 		if ip != "" && !strings.Contains(ip, ":") {
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("et_%s", strings.ReplaceAll(ip, ".", "_")),
@@ -1348,7 +1360,11 @@ func (m *Manager) syncFeodoTracker(ctx context.Context, src *Source) (added, upd
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ip := strings.Fields(line)[0]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		ip := fields[0]
 		if ip != "" {
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("feodo_%s", strings.ReplaceAll(ip, ".", "_")),
@@ -1575,7 +1591,11 @@ func (m *Manager) syncBlockListDE(ctx context.Context, src *Source) (added, upda
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ip := strings.Fields(line)[0]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		ip := fields[0]
 		if ip != "" {
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("bld_%s", strings.ReplaceAll(ip, ".", "_")),
@@ -1623,7 +1643,11 @@ func (m *Manager) syncTorExits(ctx context.Context, src *Source) (added, updated
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ip := strings.Fields(line)[0]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		ip := fields[0]
 		if ip != "" {
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("tor_%s", strings.ReplaceAll(ip, ".", "_")),

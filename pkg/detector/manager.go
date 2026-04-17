@@ -230,6 +230,28 @@ func (m *Manager) DetectNetworkConnection(conn map[string]interface{}) (*EngineR
 		}
 	}
 
+	// Check remote port (convert to string for IOC matching)
+	if remotePort, ok := conn["remote_port"]; ok {
+		portStr := fmt.Sprintf("%v", remotePort)
+		if portStr != "" && portStr != "0" {
+			result, _ := m.Detect(portStr)
+			if result != nil {
+				matches = append(matches, result.Matches...)
+			}
+		}
+	}
+
+	// Check local port (convert to string for IOC matching)
+	if localPort, ok := conn["local_port"]; ok {
+		portStr := fmt.Sprintf("%v", localPort)
+		if portStr != "" && portStr != "0" {
+			result, _ := m.Detect(portStr)
+			if result != nil {
+				matches = append(matches, result.Matches...)
+			}
+		}
+	}
+
 	return &EngineResult{Matches: matches}, nil
 }
 
@@ -416,15 +438,25 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check ports
+	// Check ports - use more precise matching to avoid false positives
 	for value, ioc := range db.ports {
-		if strings.Contains(content, ":"+value) || strings.Contains(content, value) {
-			matches = append(matches, EngineMatch{
-				SignatureID:   ioc.ID,
-				SignatureName: ioc.Description,
-				Severity:      ioc.Severity,
-				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
-			})
+		// Match port with colon prefix (e.g., ":4444" in "127.0.0.1:4444")
+		if strings.Contains(content, ":"+value) {
+			// Verify it's actually a port number and not part of a larger number
+			// by checking the character after the port number
+			idx := strings.Index(content, ":"+value)
+			if idx >= 0 {
+				portEnd := idx + len(value) + 1
+				// Check if port is followed by a non-digit character or end of string
+				if portEnd >= len(content) || !isDigit(content[portEnd]) {
+					matches = append(matches, EngineMatch{
+						SignatureID:   ioc.ID,
+						SignatureName: ioc.Description,
+						Severity:      ioc.Severity,
+						Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
+					})
+				}
+			}
 		}
 	}
 
@@ -571,4 +603,9 @@ func (db *IOCDatabase) Stats() map[string]int {
 		"urls":    len(db.urls),
 		"total":   len(db.hashes) + len(db.ips) + len(db.domains) + len(db.urls),
 	}
+}
+
+// isDigit checks if a byte is a digit (0-9)
+func isDigit(b byte) bool {
+	return b >= '0' && b <= '9'
 }

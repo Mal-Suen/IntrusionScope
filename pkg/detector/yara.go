@@ -118,8 +118,10 @@ func (d *YARADetector) matchRule(rule *YARARule, record Record) bool {
 
 	// Check each string in the rule
 	matchedStrings := make(map[string]bool)
+	definedStrings := make(map[string]bool)
 
 	for _, yaraString := range rule.Strings {
+		definedStrings[yaraString.ID] = true
 		if d.matchString(yaraString, content) {
 			matchedStrings[yaraString.ID] = true
 		}
@@ -132,12 +134,12 @@ func (d *YARADetector) matchRule(rule *YARARule, record Record) bool {
 		return len(matchedStrings) > 0
 	}
 
-	return d.evaluateCondition(condition, matchedStrings)
+	return d.evaluateCondition(condition, matchedStrings, definedStrings)
 }
 
 // evaluateCondition evaluates a YARA condition expression
 // Supports: any of them, all of them, $a, $a and $b, $a or $b, N of ($a, $b, $c)
-func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[string]bool) bool {
+func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[string]bool, definedStrings map[string]bool) bool {
 	condition = strings.ToLower(strings.TrimSpace(condition))
 
 	// Handle "any of them"
@@ -145,11 +147,17 @@ func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[st
 		return len(matchedStrings) > 0
 	}
 
-	// Handle "all of them"
+	// Handle "all of them" - all defined strings must match
 	if condition == "all of them" {
-		// All defined strings must match
-		// This is a simplified version - we'd need access to all defined strings
-		return len(matchedStrings) > 0
+		if len(definedStrings) == 0 {
+			return false
+		}
+		for strID := range definedStrings {
+			if !matchedStrings[strID] {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Handle "N of them"
@@ -159,6 +167,14 @@ func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[st
 			var required int
 			if parts[0] == "any" {
 				return len(matchedStrings) > 0
+			}
+			if parts[0] == "all" {
+				for strID := range definedStrings {
+					if !matchedStrings[strID] {
+						return false
+					}
+				}
+				return true
 			}
 			if _, err := fmt.Sscanf(parts[0], "%d", &required); err == nil {
 				return len(matchedStrings) >= required
@@ -175,7 +191,7 @@ func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[st
 	if strings.Contains(condition, " and ") {
 		parts := strings.Split(condition, " and ")
 		for _, part := range parts {
-			if !d.evaluateCondition(part, matchedStrings) {
+			if !d.evaluateCondition(part, matchedStrings, definedStrings) {
 				return false
 			}
 		}
@@ -186,7 +202,7 @@ func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[st
 	if strings.Contains(condition, " or ") {
 		parts := strings.Split(condition, " or ")
 		for _, part := range parts {
-			if d.evaluateCondition(part, matchedStrings) {
+			if d.evaluateCondition(part, matchedStrings, definedStrings) {
 				return true
 			}
 		}

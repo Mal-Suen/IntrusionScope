@@ -1,4 +1,5 @@
-// Package sync provides signature library synchronization
+// Package sync 提供威胁情报签名库的同步功能
+// 支持从多个威胁情报源（如 MalwareBazaar、URLhaus、Spamhaus 等）同步 IOC、Sigma 和 YARA 规则
 package sync
 
 import (
@@ -20,41 +21,42 @@ import (
 	"github.com/prometheus-labs/intrusionscope/internal/logger"
 )
 
-// Source represents a signature source
+// Source 表示一个威胁情报签名源
 type Source struct {
-	Name           string
-	URL            string
-	Enabled        bool
-	LastSync       time.Time
-	SignatureCount int
-	Type           string // "ioc", "sigma", "yara"
+	Name           string    // 签名源名称
+	URL            string    // 签名源 URL 地址
+	Enabled        bool      // 是否启用该签名源
+	LastSync       time.Time // 上次同步时间
+	SignatureCount int       // 签名数量
+	Type           string    // 签名类型: "ioc", "sigma", "yara"
 }
 
-// Result holds sync operation results
+// Result 保存同步操作的结果统计
 type Result struct {
-	SourcesSynced     int
-	SignaturesAdded   int
-	SignaturesUpdated int
-	Errors            int
-	Duration          time.Duration
+	SourcesSynced     int           // 成功同步的签名源数量
+	SignaturesAdded   int           // 新增的签名数量
+	SignaturesUpdated int           // 更新的签名数量
+	Errors            int           // 错误数量
+	Duration          time.Duration // 同步耗时
 }
 
-// Manager manages signature synchronization
+// Manager 管理签名同步操作
 type Manager struct {
-	config     *config.Config
-	logger     *logger.Logger
-	client     *http.Client
-	sources    map[string]*Source
-	dataDir    string
+	config     *config.Config        // 配置对象
+	logger     *logger.Logger        // 日志记录器
+	client     *http.Client          // HTTP 客户端
+	sources    map[string]*Source    // 签名源映射表
+	dataDir    string                // 数据存储目录
 }
 
-// NewManager creates a new sync manager
+// NewManager 创建一个新的签名同步管理器
 func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
+	// 创建 HTTP 客户端，设置超时和 TLS 配置
 	client := &http.Client{
 		Timeout: 120 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: false,
+				InsecureSkipVerify: false, // 不跳过 TLS 证书验证
 			},
 		},
 	}
@@ -67,22 +69,23 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 		dataDir: cfg.Sync.CacheDir,
 	}
 
-	// Ensure data directory exists
+	// 确保数据目录存在
 	os.MkdirAll(m.dataDir, 0755)
+	// 创建各类型签名子目录
 	os.MkdirAll(filepath.Join(m.dataDir, "ioc"), 0755)
 	os.MkdirAll(filepath.Join(m.dataDir, "sigma"), 0755)
 	os.MkdirAll(filepath.Join(m.dataDir, "yara"), 0755)
 
-	// Initialize sources
+	// 初始化签名源
 	m.initSources()
 
 	return m
 }
 
 func (m *Manager) initSources() {
-	// Define available sources
+	// 定义可用的签名源
 	defaultSources := map[string]Source{
-		// IOC Sources - Abuse.ch
+		// IOC 来源 - Abuse.ch 系列
 		"malwarebazaar": {
 			Name:    "MalwareBazaar",
 			URL:     "https://bazaar.abuse.ch/export/csv/sha256/full/",
@@ -113,7 +116,7 @@ func (m *Manager) initSources() {
 			Enabled: true,
 			Type:    "ioc",
 		},
-		// Spamhaus
+		// Spamhaus 系列
 		"spamhaus_drop": {
 			Name:    "Spamhaus DROP",
 			URL:     "https://www.spamhaus.org/drop/drop.txt",
@@ -126,7 +129,7 @@ func (m *Manager) initSources() {
 			Enabled: true,
 			Type:    "ioc",
 		},
-		// Phishing
+		// 钓鱼网站列表
 		"openphish": {
 			Name:    "OpenPhish",
 			URL:     "https://openphish.com/feed.txt",
@@ -139,7 +142,7 @@ func (m *Manager) initSources() {
 			Enabled: true,
 			Type:    "ioc",
 		},
-		// IP Blocklists
+		// IP 黑名单列表
 		"ipsum": {
 			Name:    "IPSum",
 			URL:     "https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt",
@@ -182,7 +185,7 @@ func (m *Manager) initSources() {
 			Enabled: true,
 			Type:    "ioc",
 		},
-		// Threat Intelligence
+		// 威胁情报平台
 		"dshield": {
 			Name:    "DShield Block List",
 			URL:     "https://isc.sans.edu/api/threatlist/shodan?json",
@@ -195,21 +198,21 @@ func (m *Manager) initSources() {
 			Enabled: true,
 			Type:    "ioc",
 		},
-		// Tor Exit Nodes
+		// Tor 出口节点
 		"torexits": {
 			Name:    "Tor Exit Nodes",
 			URL:     "https://check.torproject.org/torbulkexitlist",
 			Enabled: true,
 			Type:    "ioc",
 		},
-		// Sigma Rules
+		// Sigma 规则库
 		"sigmahq": {
 			Name:    "SigmaHQ",
 			URL:     "https://github.com/SigmaHQ/sigma",
 			Enabled: true,
 			Type:    "sigma",
 		},
-		// YARA Rules
+		// YARA 规则库
 		"yarahq": {
 			Name:    "YARAHQ",
 			URL:     "https://github.com/YARAHQ/yara-rules",
@@ -237,13 +240,13 @@ func (m *Manager) initSources() {
 	}
 
 	for k, v := range defaultSources {
-		// Create a copy of v to avoid all sources pointing to the same address
+		// 创建 v 的副本，避免所有签名源指向同一地址
 		source := v
 		m.sources[k] = &source
 	}
 }
 
-// GetAvailableSources returns list of available sources
+// GetAvailableSources 返回所有已启用的签名源名称列表
 func (m *Manager) GetAvailableSources() []string {
 	var names []string
 	for name, src := range m.sources {
@@ -254,14 +257,18 @@ func (m *Manager) GetAvailableSources() []string {
 	return names
 }
 
-// Sync performs signature synchronization
+// Sync 执行签名同步操作
+// specificSources: 指定要同步的签名源列表，为空则同步所有已启用的签名源
+// force: 是否强制同步（忽略同步间隔限制）
 func (m *Manager) Sync(specificSources []string, force bool) (*Result, error) {
 	startTime := time.Now()
 	result := &Result{}
 
+	// 设置 30 分钟超时
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
+	// 确定要同步的签名源
 	sources := specificSources
 	if len(sources) == 0 {
 		sources = m.GetAvailableSources()
@@ -279,7 +286,7 @@ func (m *Manager) Sync(specificSources []string, force bool) (*Result, error) {
 			continue
 		}
 
-		// Check if sync needed
+		// 检查是否需要同步（根据更新间隔）
 		if !force && time.Since(src.LastSync) < time.Duration(m.config.Sync.UpdateInterval)*time.Hour {
 			m.logger.Debug("Source recently synced, skipping", "source", name, "last_sync", src.LastSync)
 			continue
@@ -305,6 +312,7 @@ func (m *Manager) Sync(specificSources []string, force bool) (*Result, error) {
 	return result, nil
 }
 
+// syncSource 根据签名源类型调用对应的同步方法
 func (m *Manager) syncSource(ctx context.Context, src *Source) (added, updated int, err error) {
 	m.logger.Info("Fetching signatures from source", "source", src.Name, "url", src.URL)
 
@@ -367,7 +375,7 @@ func (m *Manager) syncSource(ctx context.Context, src *Source) (added, updated i
 	}
 }
 
-// newRequest creates a new HTTP request with proper headers
+// newRequest 创建带有正确请求头的 HTTP 请求
 func (m *Manager) newRequest(ctx context.Context, method, url string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
@@ -378,7 +386,7 @@ func (m *Manager) newRequest(ctx context.Context, method, url string) (*http.Req
 	return req, nil
 }
 
-// syncMalwareBazaar syncs malware hashes from MalwareBazaar
+// syncMalwareBazaar 从 MalwareBazaar 同步恶意软件哈希值
 func (m *Manager) syncMalwareBazaar(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -395,24 +403,24 @@ func (m *Manager) syncMalwareBazaar(ctx context.Context, src *Source) (added, up
 		return 0, 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	// Parse CSV
+	// 解析 CSV 格式
 	reader := csv.NewReader(resp.Body)
 	records, err := reader.ReadAll()
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to parse CSV: %w", err)
 	}
 
-	// Skip header and extract SHA256 hashes
+	// 跳过表头，提取 SHA256 哈希值
 	var iocs []map[string]interface{}
 	for i, record := range records {
-		if i == 0 { // Skip header
+		if i == 0 { // 跳过表头
 			continue
 		}
 		if len(record) < 1 {
 			continue
 		}
 		sha256 := strings.TrimSpace(record[0])
-		if len(sha256) == 64 { // Valid SHA256
+		if len(sha256) == 64 { // 有效的 SHA256 哈希长度
 			iocs = append(iocs, map[string]interface{}{
 				"id":          fmt.Sprintf("mb_%s", sha256[:16]),
 				"value":       sha256,
@@ -425,7 +433,7 @@ func (m *Manager) syncMalwareBazaar(ctx context.Context, src *Source) (added, up
 		}
 	}
 
-	// Save to file
+	// 保存到文件
 	outputPath := filepath.Join(m.dataDir, "ioc", "malwarebazaar.json")
 	if err := m.saveIOCs(iocs, outputPath); err != nil {
 		return 0, 0, err
@@ -435,7 +443,7 @@ func (m *Manager) syncMalwareBazaar(ctx context.Context, src *Source) (added, up
 	return len(iocs), 0, nil
 }
 
-// syncURLhaus syncs malicious URLs from URLhaus
+// syncURLhaus 从 URLhaus 同步恶意 URL 列表
 func (m *Manager) syncURLhaus(ctx context.Context, src *Source) (added, updated int, err error) {
 	// URLhaus CSV export
 	url := "https://urlhaus.abuse.ch/export/csv/"
@@ -466,7 +474,7 @@ func (m *Manager) syncURLhaus(ctx context.Context, src *Source) (added, updated 
 		if i == 0 || len(record) < 3 {
 			continue
 		}
-		// Skip comment lines
+		// 跳过注释行
 		if strings.HasPrefix(record[0], "#") {
 			continue
 		}
@@ -493,7 +501,7 @@ func (m *Manager) syncURLhaus(ctx context.Context, src *Source) (added, updated 
 	return len(iocs), 0, nil
 }
 
-// syncThreatFox syncs IOCs from ThreatFox
+// syncThreatFox 从 ThreatFox 同步 IOC 数据
 func (m *Manager) syncThreatFox(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -544,17 +552,17 @@ func (m *Manager) syncThreatFox(ctx context.Context, src *Source) (added, update
 	return len(iocs), 0, nil
 }
 
-// syncSpamhausDROP syncs IP blocklist from Spamhaus DROP
+// syncSpamhausDROP 从 Spamhaus DROP 同步 IP 黑名单
 func (m *Manager) syncSpamhausDROP(ctx context.Context, src *Source) (added, updated int, err error) {
 	return m.syncIPBlocklist(ctx, src, "spamhaus_drop.json")
 }
 
-// syncSpamhausEDROP syncs IP blocklist from Spamhaus EDROP
+// syncSpamhausEDROP 从 Spamhaus EDROP 同步 IP 黑名单
 func (m *Manager) syncSpamhausEDROP(ctx context.Context, src *Source) (added, updated int, err error) {
 	return m.syncIPBlocklist(ctx, src, "spamhaus_edrop.json")
 }
 
-// syncIPBlocklist syncs IP blocklists (Spamhaus format)
+// syncIPBlocklist 同步 IP 黑名单（Spamhaus 格式）
 func (m *Manager) syncIPBlocklist(ctx context.Context, src *Source, filename string) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -576,11 +584,11 @@ func (m *Manager) syncIPBlocklist(ctx context.Context, src *Source, filename str
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		// Skip comments and empty lines
+		// 跳过注释和空行
 		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Extract CIDR (format: 1.0.0.0/24 ; SBL12345)
+		// 提取 CIDR（格式: 1.0.0.0/24 ; SBL12345）
 		parts := strings.Split(line, ";")
 		cidr := strings.TrimSpace(parts[0])
 		if cidr != "" && strings.Contains(cidr, "/") {
@@ -605,7 +613,7 @@ func (m *Manager) syncIPBlocklist(ctx context.Context, src *Source, filename str
 	return len(iocs), 0, nil
 }
 
-// syncDShield syncs IP blocklist from DShield
+// syncDShield 从 DShield 同步 IP 黑名单
 func (m *Manager) syncDShield(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -657,10 +665,10 @@ func (m *Manager) syncDShield(ctx context.Context, src *Source) (added, updated 
 	return len(iocs), 0, nil
 }
 
-// syncAlienVault syncs IOCs from AlienVault OTX
+// syncAlienVault 从 AlienVault OTX 同步 IOC 数据
 func (m *Manager) syncAlienVault(ctx context.Context, src *Source) (added, updated int, err error) {
-	// AlienVault OTX requires API key for full access
-	// Use public export endpoint
+	// AlienVault OTX 需要 API 密钥才能完全访问
+	// 使用公开的导出端点
 	url := "https://otx.alienvault.com/api/v1/indicators/export?types=sha256,domain,ip,url"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -677,7 +685,7 @@ func (m *Manager) syncAlienVault(ctx context.Context, src *Source) (added, updat
 		return 0, 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	// Parse JSON response
+	// 解析 JSON 响应
 	var data struct {
 		Indicators []struct {
 			Indicator string `json:"indicator"`
@@ -723,23 +731,23 @@ func (m *Manager) syncAlienVault(ctx context.Context, src *Source) (added, updat
 	return len(iocs), 0, nil
 }
 
-// syncSigmaHQ syncs Sigma rules from GitHub
+// syncSigmaHQ 从 GitHub 同步 Sigma 规则
 func (m *Manager) syncSigmaHQ(ctx context.Context, src *Source) (added, updated int, err error) {
-	// Clone or update Sigma repository
+	// 克隆或更新 Sigma 仓库
 	sigmaDir := filepath.Join(m.dataDir, "sigma", "rules")
 
-	// Check if repo exists
+	// 检查仓库是否存在
 	if _, err := os.Stat(sigmaDir); os.IsNotExist(err) {
-		// Clone repo
+		// 克隆仓库
 		m.logger.Info("Downloading SigmaHQ rules...")
-		// For simplicity, download release archive
+		// 为简化操作，下载发布版压缩包
 		url := "https://github.com/SigmaHQ/sigma/archive/refs/heads/master.zip"
 		if err := m.downloadAndExtract(url, filepath.Join(m.dataDir, "sigma")); err != nil {
 			return 0, 0, fmt.Errorf("failed to download Sigma rules: %w", err)
 		}
 	}
 
-	// Count rules
+	// 统计规则数量
 	count, err := m.countYAMLFiles(sigmaDir)
 	if err != nil {
 		return 0, 0, err
@@ -749,7 +757,7 @@ func (m *Manager) syncSigmaHQ(ctx context.Context, src *Source) (added, updated 
 	return count, 0, nil
 }
 
-// syncYARAHQ syncs YARA rules from GitHub
+// syncYARAHQ 从 GitHub 同步 YARA 规则
 func (m *Manager) syncYARAHQ(ctx context.Context, src *Source) (added, updated int, err error) {
 	yaraDir := filepath.Join(m.dataDir, "yara", "rules")
 
@@ -770,7 +778,7 @@ func (m *Manager) syncYARAHQ(ctx context.Context, src *Source) (added, updated i
 	return count, 0, nil
 }
 
-// syncGeneric handles unknown sources
+// syncGeneric 处理未知类型的签名源
 func (m *Manager) syncGeneric(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -787,7 +795,7 @@ func (m *Manager) syncGeneric(ctx context.Context, src *Source) (added, updated 
 		return 0, 0, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	// Just save the response
+	// 直接保存响应内容
 	outputPath := filepath.Join(m.dataDir, src.Type, fmt.Sprintf("%s.txt", src.Name))
 	out, err := os.Create(outputPath)
 	if err != nil {
@@ -799,7 +807,7 @@ func (m *Manager) syncGeneric(ctx context.Context, src *Source) (added, updated 
 	return 0, 0, err
 }
 
-// saveIOCs saves IOCs to a JSON file
+// saveIOCs 将 IOC 数据保存为 JSON 文件
 func (m *Manager) saveIOCs(iocs []map[string]interface{}, path string) error {
 	data, err := json.MarshalIndent(iocs, "", "  ")
 	if err != nil {
@@ -809,7 +817,7 @@ func (m *Manager) saveIOCs(iocs []map[string]interface{}, path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// downloadAndExtract downloads and extracts a zip file
+// downloadAndExtract 下载并解压 ZIP 文件
 func (m *Manager) downloadAndExtract(url, dest string) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -827,7 +835,7 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	// Save zip file
+	// 保存 ZIP 文件
 	zipPath := dest + ".zip"
 	out, err := os.Create(zipPath)
 	if err != nil {
@@ -843,7 +851,7 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 
 	m.logger.Info("Downloaded archive", "path", zipPath)
 
-	// Extract zip file
+	// 解压 ZIP 文件
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		os.Remove(zipPath)
@@ -851,25 +859,25 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 	}
 	defer r.Close()
 
-	// Create destination directory
+	// 创建目标目录
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	for _, f := range r.File {
-		// Skip directories
+		// 跳过目录
 		if f.FileInfo().IsDir() {
 			continue
 		}
 
-		// Open file in zip
+		// 打开 ZIP 内的文件
 		rc, err := f.Open()
 		if err != nil {
 			continue
 		}
 
-		// Create destination file path
-		// Remove the top-level directory from the path (e.g., "rules-master/" -> "")
+		// 创建目标文件路径
+		// 移除顶层目录路径（例如 "rules-master/" -> ""）
 		parts := strings.SplitN(f.Name, "/", 2)
 		var relPath string
 		if len(parts) > 1 {
@@ -883,7 +891,7 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 			continue
 		}
 
-		// Security: Clean the path and check for path traversal
+		// 安全检查：清理路径并检查路径穿越
 		relPath = filepath.Clean(relPath)
 		if strings.HasPrefix(relPath, "..") || strings.HasPrefix(relPath, string(os.PathSeparator)) {
 			m.logger.Warn("Skipping potentially malicious path in zip", "path", f.Name)
@@ -893,7 +901,7 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 
 		dstPath := filepath.Join(dest, relPath)
 
-		// Security: Verify the final path is within the destination directory
+		// 安全检查：验证最终路径在目标目录内
 		absDest, err := filepath.Abs(dest)
 		if err != nil {
 			rc.Close()
@@ -910,13 +918,13 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 			continue
 		}
 
-		// Create parent directories
+		// 创建父目录
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 			rc.Close()
 			continue
 		}
 
-		// Create and write file
+		// 创建并写入文件
 		dstFile, err := os.Create(dstPath)
 		if err != nil {
 			rc.Close()
@@ -935,7 +943,7 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 	return os.Remove(zipPath)
 }
 
-// countYAMLFiles counts YAML files in a directory
+// countYAMLFiles 统计目录中的 YAML 文件数量
 func (m *Manager) countYAMLFiles(dir string) (int, error) {
 	count := 0
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -950,7 +958,7 @@ func (m *Manager) countYAMLFiles(dir string) (int, error) {
 	return count, err
 }
 
-// countYARAFiles counts YARA files in a directory
+// countYARAFiles 统计目录中的 YARA 文件数量
 func (m *Manager) countYARAFiles(dir string) (int, error) {
 	count := 0
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -965,7 +973,7 @@ func (m *Manager) countYARAFiles(dir string) (int, error) {
 	return count, err
 }
 
-// GetSourceStatus returns status of all sources
+// GetSourceStatus 返回所有签名源的状态
 func (m *Manager) GetSourceStatus() map[string]Source {
 	status := make(map[string]Source)
 	for k, v := range m.sources {
@@ -974,12 +982,12 @@ func (m *Manager) GetSourceStatus() map[string]Source {
 	return status
 }
 
-// syncSpamhausASNDROP syncs ASN blocklist from Spamhaus
+// syncSpamhausASNDROP 从 Spamhaus 同步 ASN 黑名单
 func (m *Manager) syncSpamhausASNDROP(ctx context.Context, src *Source) (added, updated int, err error) {
 	return m.syncIPBlocklist(ctx, src, "spamhaus_asndrop.json")
 }
 
-// syncOpenPhish syncs phishing URLs from OpenPhish
+// syncOpenPhish 从 OpenPhish 同步钓鱼 URL 列表
 func (m *Manager) syncOpenPhish(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1026,7 +1034,7 @@ func (m *Manager) syncOpenPhish(ctx context.Context, src *Source) (added, update
 	return len(iocs), 0, nil
 }
 
-// syncPhishingDB syncs phishing URLs from Phishing.Database
+// syncPhishingDB 从 Phishing.Database 同步钓鱼 URL 列表
 func (m *Manager) syncPhishingDB(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1045,7 +1053,7 @@ func (m *Manager) syncPhishingDB(ctx context.Context, src *Source) (added, updat
 
 	scanner := bufio.NewScanner(resp.Body)
 	var iocs []map[string]interface{}
-	maxIOCs := 50000 // Limit to prevent memory issues
+	maxIOCs := 50000 // 限制数量以防止内存问题
 
 	for scanner.Scan() && len(iocs) < maxIOCs {
 		line := strings.TrimSpace(scanner.Text())
@@ -1074,7 +1082,7 @@ func (m *Manager) syncPhishingDB(ctx context.Context, src *Source) (added, updat
 	return len(iocs), 0, nil
 }
 
-// syncRansomwareTracker syncs ransomware URLs
+// syncRansomwareTracker 同步勒索软件 URL 列表
 func (m *Manager) syncRansomwareTracker(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1121,7 +1129,7 @@ func (m *Manager) syncRansomwareTracker(ctx context.Context, src *Source) (added
 	return len(iocs), 0, nil
 }
 
-// syncSSLBlacklist syncs SSL certificate blacklists
+// syncSSLBlacklist 同步 SSL 证书黑名单
 func (m *Manager) syncSSLBlacklist(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1151,7 +1159,7 @@ func (m *Manager) syncSSLBlacklist(ctx context.Context, src *Source) (added, upd
 		}
 		if len(record) >= 1 {
 			sha1 := strings.TrimSpace(record[0])
-			if len(sha1) == 40 { // Valid SHA1
+			if len(sha1) == 40 { // 有效的 SHA1 哈希长度
 				description := "SSL Blacklist certificate"
 				if len(record) > 1 {
 					description = record[1]
@@ -1178,7 +1186,7 @@ func (m *Manager) syncSSLBlacklist(ctx context.Context, src *Source) (added, upd
 	return len(iocs), 0, nil
 }
 
-// syncBinaryDefense syncs IP blocklist from Binary Defense
+// syncBinaryDefense 从 Binary Defense 同步 IP 黑名单
 func (m *Manager) syncBinaryDefense(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1203,7 +1211,7 @@ func (m *Manager) syncBinaryDefense(ctx context.Context, src *Source) (added, up
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 			continue
 		}
-		// Parse IP address
+		// 解析 IP 地址
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -1231,7 +1239,7 @@ func (m *Manager) syncBinaryDefense(ctx context.Context, src *Source) (added, up
 	return len(iocs), 0, nil
 }
 
-// syncCINSArmy syncs IP blocklist from CINS Army
+// syncCINSArmy 从 CINS Army 同步 IP 黑名单
 func (m *Manager) syncCINSArmy(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1283,7 +1291,7 @@ func (m *Manager) syncCINSArmy(ctx context.Context, src *Source) (added, updated
 	return len(iocs), 0, nil
 }
 
-// syncEmergingThreats syncs IP blocklist from Emerging Threats
+// syncEmergingThreats 从 Emerging Threats 同步 IP 黑名单
 func (m *Manager) syncEmergingThreats(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1335,7 +1343,7 @@ func (m *Manager) syncEmergingThreats(ctx context.Context, src *Source) (added, 
 	return len(iocs), 0, nil
 }
 
-// syncFeodoTracker syncs botnet C2 IPs from Feodo Tracker
+// syncFeodoTracker 从 Feodo Tracker 同步僵尸网络 C2 IP 列表
 func (m *Manager) syncFeodoTracker(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1387,7 +1395,7 @@ func (m *Manager) syncFeodoTracker(ctx context.Context, src *Source) (added, upd
 	return len(iocs), 0, nil
 }
 
-// syncIPSum syncs aggregated IP blocklist from IPSum
+// syncIPSum 从 IPSum 同步聚合的 IP 黑名单
 func (m *Manager) syncIPSum(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1406,7 +1414,7 @@ func (m *Manager) syncIPSum(ctx context.Context, src *Source) (added, updated in
 
 	scanner := bufio.NewScanner(resp.Body)
 	var iocs []map[string]interface{}
-	maxIOCs := 100000 // Limit for IPSum
+	maxIOCs := 100000 // IPSum 数据量限制
 
 	for scanner.Scan() && len(iocs) < maxIOCs {
 		line := strings.TrimSpace(scanner.Text())
@@ -1439,7 +1447,7 @@ func (m *Manager) syncIPSum(ctx context.Context, src *Source) (added, updated in
 	return len(iocs), 0, nil
 }
 
-// syncYARARulesHub syncs YARA rules from YARA Rules Hub
+// syncYARARulesHub 从 YARA Rules Hub 同步 YARA 规则
 func (m *Manager) syncYARARulesHub(ctx context.Context, src *Source) (added, updated int, err error) {
 	yaraDir := filepath.Join(m.dataDir, "yara", "ruleshub")
 
@@ -1460,7 +1468,7 @@ func (m *Manager) syncYARARulesHub(ctx context.Context, src *Source) (added, upd
 	return count, 0, nil
 }
 
-// syncBartBlaze syncs YARA rules from BartBlaze
+// syncBartBlaze 从 BartBlaze 同步 YARA 规则
 func (m *Manager) syncBartBlaze(ctx context.Context, src *Source) (added, updated int, err error) {
 	yaraDir := filepath.Join(m.dataDir, "yara", "rules")
 
@@ -1481,7 +1489,7 @@ func (m *Manager) syncBartBlaze(ctx context.Context, src *Source) (added, update
 	return count, 0, nil
 }
 
-// syncStratosphere syncs YARA rules from Stratosphere
+// syncStratosphere 从 Stratosphere 同步 YARA 规则
 func (m *Manager) syncStratosphere(ctx context.Context, src *Source) (added, updated int, err error) {
 	yaraDir := filepath.Join(m.dataDir, "yara", "rules")
 
@@ -1502,7 +1510,7 @@ func (m *Manager) syncStratosphere(ctx context.Context, src *Source) (added, upd
 	return count, 0, nil
 }
 
-// syncFireHOL syncs IP blocklists from FireHOL
+// syncFireHOL 从 FireHOL 同步 IP 黑名单
 func (m *Manager) syncFireHOL(ctx context.Context, src *Source, filename string) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1521,14 +1529,14 @@ func (m *Manager) syncFireHOL(ctx context.Context, src *Source, filename string)
 
 	scanner := bufio.NewScanner(resp.Body)
 	var iocs []map[string]interface{}
-	maxIOCs := 50000 // Limit for FireHOL
+	maxIOCs := 50000 // FireHOL 数据量限制
 
 	for scanner.Scan() && len(iocs) < maxIOCs {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Parse IP or CIDR
+		// 解析 IP 或 CIDR
 		fields := strings.Fields(line)
 		if len(fields) > 0 {
 			ip := fields[0]
@@ -1565,7 +1573,7 @@ func (m *Manager) syncFireHOL(ctx context.Context, src *Source, filename string)
 	return len(iocs), 0, nil
 }
 
-// syncBlockListDE syncs IP blocklists from BlockList.de
+// syncBlockListDE 从 BlockList.de 同步 IP 黑名单
 func (m *Manager) syncBlockListDE(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {
@@ -1618,7 +1626,7 @@ func (m *Manager) syncBlockListDE(ctx context.Context, src *Source) (added, upda
 	return len(iocs), 0, nil
 }
 
-// syncTorExits syncs Tor exit node IPs
+// syncTorExits 同步 Tor 出口节点 IP 列表
 func (m *Manager) syncTorExits(ctx context.Context, src *Source) (added, updated int, err error) {
 	req, err := m.newRequest(ctx, "GET", src.URL)
 	if err != nil {

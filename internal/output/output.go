@@ -1,4 +1,5 @@
-// Package output provides output formatting for IntrusionScope results
+// Package output 提供 IntrusionScope 扫描结果的输出格式化功能
+// 支持 JSON、CSV、HTML 和文本表格等多种输出格式
 package output
 
 import (
@@ -13,62 +14,62 @@ import (
 	"time"
 )
 
-// Format represents output format
+// Format 表示输出格式类型
 type Format string
 
 const (
-	// FormatJSON outputs in JSON format
+	// FormatJSON 以 JSON 格式输出
 	FormatJSON Format = "json"
-	// FormatCSV outputs in CSV format
+	// FormatCSV 以 CSV 格式输出
 	FormatCSV Format = "csv"
-	// FormatHTML outputs in HTML format
+	// FormatHTML 以 HTML 格式输出
 	FormatHTML Format = "html"
-	// FormatTable outputs as text table
+	// FormatTable 以文本表格格式输出
 	FormatTable Format = "table"
 )
 
-// Result represents a single result item
+// Result 表示单个扫描结果项
 type Result struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	Artifact    string                 `json:"artifact"`
-	Source      string                 `json:"source"`
-	Data        map[string]interface{} `json:"data"`
-	ThreatLevel int                    `json:"threat_level,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
+	Timestamp   time.Time              `json:"timestamp"`             // 时间戳
+	Artifact    string                 `json:"artifact"`              // 产物名称
+	Source      string                 `json:"source"`                // 数据来源
+	Data        map[string]interface{} `json:"data"`                  // 结果数据
+	ThreatLevel int                    `json:"threat_level,omitempty"` // 威胁等级
+	Tags        []string               `json:"tags,omitempty"`        // 标签列表
 }
 
-// Report represents a complete output report
+// Report 表示完整的输出报告
 type Report struct {
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time"`
-	HostInfo    HostInfo  `json:"host_info"`
-	Results     []Result  `json:"results"`
-	Summary     Summary   `json:"summary"`
+	StartTime   time.Time `json:"start_time"` // 扫描开始时间
+	EndTime     time.Time `json:"end_time"`   // 扫描结束时间
+	HostInfo    HostInfo  `json:"host_info"`  // 主机信息
+	Results     []Result  `json:"results"`    // 扫描结果列表
+	Summary     Summary   `json:"summary"`    // 扫描摘要统计
 }
 
-// HostInfo contains information about the scanned host
+// HostInfo 包含被扫描主机的信息
 type HostInfo struct {
-	Hostname string `json:"hostname"`
-	OS       string `json:"os"`
-	Platform string `json:"platform"`
-	IPs      []string `json:"ips"`
+	Hostname string   `json:"hostname"` // 主机名
+	OS       string   `json:"os"`       // 操作系统
+	Platform string   `json:"platform"` // 平台类型
+	IPs      []string `json:"ips"`      // IP 地址列表
 }
 
-// Summary contains scan summary statistics
+// Summary 包含扫描摘要统计信息
 type Summary struct {
-	TotalArtifacts  int            `json:"total_artifacts"`
-	TotalFindings   int            `json:"total_findings"`
-	ThreatsByLevel  map[int]int    `json:"threats_by_level"`
-	ArtifactsByType map[string]int `json:"artifacts_by_type"`
+	TotalArtifacts  int            `json:"total_artifacts"`   // 产物总数
+	TotalFindings   int            `json:"total_findings"`    // 发现总数
+	ThreatsByLevel  map[int]int    `json:"threats_by_level"`  // 按威胁等级统计
+	ArtifactsByType map[string]int `json:"artifacts_by_type"` // 按产物类型统计
 }
 
-// Writer handles writing output in various formats
+// Writer 处理多种格式的输出写入
 type Writer struct {
-	format Format
-	writer io.Writer
+	format Format    // 输出格式
+	writer io.Writer // 输出写入器
 }
 
-// NewWriter creates a new output writer
+// NewWriter 创建一个新的输出写入器
 func NewWriter(format Format, w io.Writer) *Writer {
 	return &Writer{
 		format: format,
@@ -76,7 +77,7 @@ func NewWriter(format Format, w io.Writer) *Writer {
 	}
 }
 
-// WriteReport writes a complete report
+// WriteReport 写入完整的报告
 func (w *Writer) WriteReport(report *Report) error {
 	switch w.format {
 	case FormatJSON:
@@ -92,26 +93,28 @@ func (w *Writer) WriteReport(report *Report) error {
 	}
 }
 
+// writeJSON 以 JSON 格式写入报告
 func (w *Writer) writeJSON(report *Report) error {
 	encoder := json.NewEncoder(w.writer)
-	encoder.SetIndent("", "  ")
+	encoder.SetIndent("", "  ") // 设置缩进为两个空格
 	return encoder.Encode(report)
 }
 
+// writeCSV 以 CSV 格式写入报告
 func (w *Writer) writeCSV(report *Report) error {
 	cw := csv.NewWriter(w.writer)
 	defer cw.Flush()
 
-	// Write header
+	// 写入表头
 	header := []string{"Timestamp", "Artifact", "Source", "Threat Level", "Tags", "Data"}
 	if err := cw.Write(header); err != nil {
 		return err
 	}
 
-	// Write rows
+	// 写入数据行
 	for _, r := range report.Results {
-		tags := strings.Join(r.Tags, ";")
-		data, _ := json.Marshal(r.Data)
+		tags := strings.Join(r.Tags, ";") // 标签用分号分隔
+		data, _ := json.Marshal(r.Data)   // 数据字段序列化为 JSON
 		row := []string{
 			r.Timestamp.Format(time.RFC3339),
 			r.Artifact,
@@ -128,6 +131,7 @@ func (w *Writer) writeCSV(report *Report) error {
 	return nil
 }
 
+// writeHTML 以 HTML 格式写入报告
 func (w *Writer) writeHTML(report *Report) error {
 	tmpl := `<!DOCTYPE html>
 <html lang="en">
@@ -398,6 +402,7 @@ func (w *Writer) writeHTML(report *Report) error {
 </body>
 </html>`
 
+	// 创建模板并添加 json 函数
 	t, err := template.New("report").Funcs(template.FuncMap{
 		"json": func(v interface{}) string {
 			b, _ := json.MarshalIndent(v, "", "  ")
@@ -408,16 +413,20 @@ func (w *Writer) writeHTML(report *Report) error {
 		return err
 	}
 
+	// 执行模板并写入输出
 	return t.Execute(w.writer, report)
 }
 
+// writeTable 以文本表格格式写入报告
 func (w *Writer) writeTable(report *Report) error {
+	// 输出报告头部信息
 	fmt.Fprintf(w.writer, "IntrusionScope Report\n")
 	fmt.Fprintf(w.writer, "=====================\n\n")
 	fmt.Fprintf(w.writer, "Host: %s (%s)\n", report.HostInfo.Hostname, report.HostInfo.OS)
 	fmt.Fprintf(w.writer, "Scan Time: %s - %s\n", report.StartTime, report.EndTime)
 	fmt.Fprintf(w.writer, "Total Findings: %d\n\n", report.Summary.TotalFindings)
 
+	// 输出每个结果项
 	for _, r := range report.Results {
 		fmt.Fprintf(w.writer, "[%s] %s - %s (Threat: %d)\n",
 			r.Timestamp.Format(time.RFC3339),
@@ -430,19 +439,22 @@ func (w *Writer) writeTable(report *Report) error {
 	return nil
 }
 
-// WriteFile writes output to a file
+// WriteFile 将报告写入指定文件
 func WriteFile(report *Report, format Format, path string) error {
+	// 确保目标目录存在
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
+	// 创建目标文件
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
+	// 使用 Writer 写入报告
 	w := NewWriter(format, f)
 	return w.WriteReport(report)
 }

@@ -1,4 +1,5 @@
-// Package config provides configuration management for IntrusionScope
+// Package config 提供 IntrusionScope 的配置管理功能。
+// 支持 INI/YAML 格式配置文件、环境变量覆盖和默认值设置。
 package config
 
 import (
@@ -10,75 +11,75 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config holds all configuration for IntrusionScope
+// Config IntrusionScope 完整配置结构
 type Config struct {
-	General   GeneralConfig   `mapstructure:"general"`
-	Collector CollectorConfig `mapstructure:"collector"`
-	Detector  DetectorConfig  `mapstructure:"detector"`
-	Sync      SyncConfig      `mapstructure:"sync"`
-	Output    OutputConfig    `mapstructure:"output"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
+	General   GeneralConfig   `mapstructure:"general"`   // 通用设置
+	Collector CollectorConfig `mapstructure:"collector"` // 采集器设置
+	Detector  DetectorConfig  `mapstructure:"detector"`  // 检测器设置
+	Sync      SyncConfig      `mapstructure:"sync"`      // 同步设置
+	Output    OutputConfig    `mapstructure:"output"`    // 输出设置
+	Logging   LoggingConfig   `mapstructure:"logging"`   // 日志设置
 }
 
-// GeneralConfig holds general settings
+// GeneralConfig 通用配置
 type GeneralConfig struct {
-	TempDir     string `mapstructure:"temp_dir"`
-	MaxWorkers  int    `mapstructure:"max_workers"`
-	Timeout     int    `mapstructure:"timeout"` // seconds
-	OfflineMode bool   `mapstructure:"offline_mode"`
+	TempDir     string `mapstructure:"temp_dir"`     // 临时目录
+	MaxWorkers  int    `mapstructure:"max_workers"`  // 最大工作线程数
+	Timeout     int    `mapstructure:"timeout"`      // 超时时间（秒）
+	OfflineMode bool   `mapstructure:"offline_mode"` // 离线模式
 }
 
-// CollectorConfig holds collector settings
+// CollectorConfig 采集器配置
 type CollectorConfig struct {
-	DefaultPreset string `mapstructure:"default_preset"`
-	MaxFileSize   int64  `mapstructure:"max_file_size"` // bytes
-	HashAlgorithms []string `mapstructure:"hash_algorithms"`
+	DefaultPreset string   `mapstructure:"default_preset"` // 默认预设
+	MaxFileSize   int64    `mapstructure:"max_file_size"`  // 最大文件大小（字节）
+	HashAlgorithms []string `mapstructure:"hash_algorithms"` // 哈希算法列表
 }
 
-// DetectorConfig holds detector settings
+// DetectorConfig 检测器配置
 type DetectorConfig struct {
-	MinSeverity    string `mapstructure:"min_severity"`
-	EnableYARA     bool   `mapstructure:"enable_yara"`
-	EnableSigma    bool   `mapstructure:"enable_sigma"`
-	EnableIOC      bool   `mapstructure:"enable_ioc"`
-	MaxMemoryMB    int    `mapstructure:"max_memory_mb"`
+	MinSeverity    string `mapstructure:"min_severity"` // 最低严重级别
+	EnableYARA     bool   `mapstructure:"enable_yara"`  // 启用 YARA 检测
+	EnableSigma    bool   `mapstructure:"enable_sigma"` // 启用 Sigma 检测
+	EnableIOC      bool   `mapstructure:"enable_ioc"`   // 启用 IOC 检测
+	MaxMemoryMB    int    `mapstructure:"max_memory_mb"` // 最大内存使用（MB）
 }
 
-// SyncConfig holds signature sync settings
+// SyncConfig 签名同步配置
 type SyncConfig struct {
-	Enabled       bool     `mapstructure:"enabled"`
-	UpdateInterval int      `mapstructure:"update_interval"` // hours
-	Sources       []string `mapstructure:"sources"`
-	CacheDir      string   `mapstructure:"cache_dir"`
+	Enabled       bool     `mapstructure:"enabled"`        // 是否启用同步
+	UpdateInterval int      `mapstructure:"update_interval"` // 更新间隔（小时）
+	Sources       []string `mapstructure:"sources"`        // 同步源列表
+	CacheDir      string   `mapstructure:"cache_dir"`      // 缓存目录
 }
 
-// OutputConfig holds output settings
+// OutputConfig 输出配置
 type OutputConfig struct {
-	DefaultFormat string `mapstructure:"default_format"`
-	OutputDir     string `mapstructure:"output_dir"`
-	Compress      bool   `mapstructure:"compress"`
+	DefaultFormat string `mapstructure:"default_format"` // 默认输出格式
+	OutputDir     string `mapstructure:"output_dir"`     // 输出目录
+	Compress      bool   `mapstructure:"compress"`       // 是否压缩
 }
 
-// LoggingConfig holds logging settings
+// LoggingConfig 日志配置
 type LoggingConfig struct {
-	Level    string `mapstructure:"level"`
-	Format   string `mapstructure:"format"` // json or text
-	FilePath string `mapstructure:"file_path"`
-	MaxSize  int    `mapstructure:"max_size"` // MB
+	Level    string `mapstructure:"level"`     // 日志级别
+	Format   string `mapstructure:"format"`    // 日志格式：json 或 text
+	FilePath string `mapstructure:"file_path"` // 日志文件路径
+	MaxSize  int    `mapstructure:"max_size"`  // 日志文件最大大小（MB）
 }
 
-// Load loads configuration from file and environment
+// Load 从文件和环境变量加载配置
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
-	// Set defaults
+	// 设置默认值
 	setDefaults(v)
 
-	// Set config file
+	// 设置配置文件
 	if configPath != "" {
 		v.SetConfigFile(configPath)
 	} else {
-		// Look for config in standard locations
+		// 在标准位置查找配置文件
 		v.SetConfigName(".intrusionscope")
 		v.SetConfigType("ini")
 		v.AddConfigPath(".")
@@ -86,16 +87,16 @@ func Load(configPath string) (*Config, error) {
 		v.AddConfigPath("/etc/intrusionscope")
 	}
 
-	// Read environment variables
+	// 读取环境变量
 	v.SetEnvPrefix("IS")
 	v.AutomaticEnv()
 
-	// Read config file (ignore if not found)
+	// 读取配置文件（忽略未找到的情况）
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
-		// Config file not found, use defaults
+		// 配置文件未找到，使用默认值
 	}
 
 	var cfg Config
@@ -103,12 +104,13 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
-	// Apply post-processing
+	// 应用后处理
 	applyDefaults(&cfg)
 
 	return &cfg, nil
 }
 
+// setDefaults 设置配置默认值
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("general.temp_dir", "")
 	v.SetDefault("general.max_workers", runtime.NumCPU())
@@ -140,6 +142,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_size", 100)
 }
 
+// applyDefaults 应用运行时默认值
 func applyDefaults(cfg *Config) {
 	if cfg.Sync.CacheDir == "" {
 		cfg.Sync.CacheDir = filepath.Join(getDataDir(), "signatures")
@@ -149,6 +152,7 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
+// getConfigDir 获取配置文件目录
 func getConfigDir() string {
 	if runtime.GOOS == "windows" {
 		if appData := os.Getenv("APPDATA"); appData != "" {
@@ -159,6 +163,7 @@ func getConfigDir() string {
 	return filepath.Join(home, ".config", "intrusionscope")
 }
 
+// getDataDir 获取数据目录
 func getDataDir() string {
 	if runtime.GOOS == "windows" {
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
@@ -169,12 +174,12 @@ func getDataDir() string {
 	return filepath.Join(home, ".local", "share", "intrusionscope")
 }
 
-// Save saves configuration to file
+// Save 保存配置到文件
 func (c *Config) Save(path string) error {
 	v := viper.New()
 	v.SetConfigFile(path)
 
-	// Set all values
+	// 设置所有值
 	v.Set("general", c.General)
 	v.Set("collector", c.Collector)
 	v.Set("detector", c.Detector)

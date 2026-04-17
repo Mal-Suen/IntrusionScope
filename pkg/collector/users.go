@@ -1,5 +1,5 @@
-// Package collector provides forensic artifact collection capabilities
-// This file contains user-related collectors
+// Package collector 提供取证工件收集能力
+// 本文件包含用户相关的收集器实现
 package collector
 
 import (
@@ -14,31 +14,36 @@ import (
 	"time"
 )
 
-// LoggedInUsersCollector collects currently logged in users
+// LoggedInUsersCollector 已登录用户收集器，收集当前登录的用户信息
 type LoggedInUsersCollector struct{}
 
+// Name 返回收集器名称
 func (c *LoggedInUsersCollector) Name() string {
 	return "users.logged_in"
 }
 
+// Description 返回收集器描述
 func (c *LoggedInUsersCollector) Description() string {
 	return "Collects currently logged in users"
 }
 
+// Platform 返回支持的平台
 func (c *LoggedInUsersCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *LoggedInUsersCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 收集当前登录的用户信息
 func (c *LoggedInUsersCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
+	// 根据操作系统选择不同的收集方法
 	if runtime.GOOS == "linux" {
-		// Parse utmp/wtmp
 		records = c.collectLinux()
 	} else {
 		records = c.collectWindows()
@@ -56,16 +61,17 @@ func (c *LoggedInUsersCollector) Collect(ctx context.Context, opts *Options) (*R
 	return result, nil
 }
 
+// collectLinux 在 Linux 系统上收集登录用户信息
 func (c *LoggedInUsersCollector) collectLinux() []Record {
 	var records []Record
 
-	// Use 'who' command output via /var/run/utmp
-	// Simplified: read /var/run/utmp binary format
-	// For now, use w command output parsing
+	// 通过 /var/run/utmp 获取登录用户信息
+	// 简化实现：读取 /var/run/utmp 二进制格式
+	// 目前使用 w 命令输出解析
 
 	file, err := os.Open("/var/run/utmp")
 	if err != nil {
-		// Fallback: return placeholder
+		// 回退：返回占位信息
 		records = append(records, Record{
 			Timestamp: time.Now(),
 			Source:    "utmp",
@@ -77,39 +83,39 @@ func (c *LoggedInUsersCollector) collectLinux() []Record {
 	}
 	defer file.Close()
 
-	// TODO: Parse utmp binary format
-	// The utmp structure is defined in /usr/include/bits/utmp.h
+	// TODO: 解析 utmp 二进制格式
+	// utmp 结构定义在 /usr/include/bits/utmp.h
 
 	return records
 }
 
+// collectWindows 在 Windows 系统上收集登录用户信息
 func (c *LoggedInUsersCollector) collectWindows() []Record {
 	var records []Record
 
-	// Use 'query user' command to get logged in users
+	// 使用 query user 命令获取登录用户
 	cmd := exec.Command("query", "user")
 	output, err := cmd.Output()
 	if err != nil {
-		// Fallback: try 'whoami' for current user
+		// 回退：使用 whoami 获取当前用户
 		records = c.collectWindowsFallback()
 		return records
 	}
 
-	// Parse output:
+	// 解析输出格式：
 	// 用户名                会话名             ID  状态    空闲时间   登录时间
 	// >malco                 console             1  运行中      无     2026/4/16 10:47
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	lineNum := 0
 
-	// Regex to parse the line
-	// Format: [>]username session id status idle logonTime
+	// 正则表达式解析每行
 	lineRegex := regexp.MustCompile(`^([> ])?(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.+)$`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineNum++
 
-		// Skip header line
+		// 跳过标题行
 		if lineNum == 1 || strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -138,10 +144,11 @@ func (c *LoggedInUsersCollector) collectWindows() []Record {
 	return records
 }
 
+// collectWindowsFallback Windows 回退方法，使用 whoami 获取当前用户
 func (c *LoggedInUsersCollector) collectWindowsFallback() []Record {
 	var records []Record
 
-	// Use whoami to get current user
+	// 使用 whoami 获取当前用户
 	cmd := exec.Command("whoami")
 	output, err := cmd.Output()
 	if err != nil {
@@ -153,7 +160,7 @@ func (c *LoggedInUsersCollector) collectWindowsFallback() []Record {
 		return records
 	}
 
-	// Split domain\user if present
+	// 分离域和用户名
 	parts := strings.Split(username, "\\")
 	user := username
 	domain := ""
@@ -175,30 +182,35 @@ func (c *LoggedInUsersCollector) collectWindowsFallback() []Record {
 	return records
 }
 
-// SudoHistoryCollector collects sudo command history
+// SudoHistoryCollector Sudo 命令历史收集器，从日志收集 sudo 命令历史
 type SudoHistoryCollector struct{}
 
+// Name 返回收集器名称
 func (c *SudoHistoryCollector) Name() string {
 	return "users.sudo_history"
 }
 
+// Description 返回收集器描述
 func (c *SudoHistoryCollector) Description() string {
 	return "Collects sudo command history from logs"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *SudoHistoryCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *SudoHistoryCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集 sudo 命令历史
 func (c *SudoHistoryCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Read sudo log (typically in auth.log or syslog)
+	// sudo 日志通常在 auth.log 或 syslog 中
 	logFiles := []string{
 		"/var/log/auth.log",
 		"/var/log/secure",
@@ -214,19 +226,19 @@ func (c *SudoHistoryCollector) Collect(ctx context.Context, opts *Options) (*Res
 		for scanner.Scan() {
 			line := scanner.Text()
 
-			// Look for sudo entries
+			// 查找 sudo 条目
 			if strings.Contains(line, "sudo:") {
 				records = append(records, Record{
 					Timestamp: time.Now(),
 					Source:    "auth_log",
 					Data: map[string]interface{}{
-						"file":    logFile,
-						"line":    line,
+						"file": logFile,
+						"line": line,
 					},
 				})
 			}
 		}
-		file.Close() // Close immediately after processing, not defer in loop
+		file.Close() // 在循环中立即关闭，不使用 defer
 	}
 
 	result := &Result{
@@ -241,30 +253,35 @@ func (c *SudoHistoryCollector) Collect(ctx context.Context, opts *Options) (*Res
 	return result, nil
 }
 
-// BashHistoryCollector collects bash command history
+// BashHistoryCollector Bash 命令历史收集器，收集所有用户的 bash 命令历史
 type BashHistoryCollector struct{}
 
+// Name 返回收集器名称
 func (c *BashHistoryCollector) Name() string {
 	return "users.bash_history"
 }
 
+// Description 返回收集器描述
 func (c *BashHistoryCollector) Description() string {
 	return "Collects bash command history for all users"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *BashHistoryCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *BashHistoryCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集所有用户的 bash 命令历史
 func (c *BashHistoryCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Read /etc/passwd to find home directories
+	// 读取 /etc/passwd 获取用户主目录
 	passwdFile, err := os.Open("/etc/passwd")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read /etc/passwd: %w", err)
@@ -282,12 +299,14 @@ func (c *BashHistoryCollector) Collect(ctx context.Context, opts *Options) (*Res
 		username := fields[0]
 		homeDir := fields[5]
 
+		// 读取用户的 .bash_history 文件
 		historyFile := homeDir + "/.bash_history"
 		content, err := os.ReadFile(historyFile)
 		if err != nil {
 			continue
 		}
 
+		// 解析历史文件内容
 		lines := strings.Split(string(content), "\n")
 		for i, line := range lines {
 			if line == "" {

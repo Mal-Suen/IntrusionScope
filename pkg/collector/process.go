@@ -1,5 +1,5 @@
-// Package collector provides forensic artifact collection capabilities
-// This file contains process-related collectors
+// Package collector 提供取证工件收集能力
+// 本文件包含进程相关的收集器实现
 package collector
 
 import (
@@ -15,25 +15,30 @@ import (
 	"time"
 )
 
-// ProcessListCollector collects running process list
+// ProcessListCollector 进程列表收集器，用于收集运行中的进程信息
 type ProcessListCollector struct{}
 
+// Name 返回收集器名称
 func (c *ProcessListCollector) Name() string {
 	return "process.list"
 }
 
+// Description 返回收集器描述
 func (c *ProcessListCollector) Description() string {
 	return "Collects list of running processes"
 }
 
+// Platform 返回支持的平台，"all" 表示支持所有平台
 func (c *ProcessListCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器在当前环境是否可用
 func (c *ProcessListCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 执行进程列表收集，根据操作系统选择不同的收集方法
 func (c *ProcessListCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	result := &Result{
@@ -45,6 +50,7 @@ func (c *ProcessListCollector) Collect(ctx context.Context, opts *Options) (*Res
 	var records []Record
 	var err error
 
+	// 根据操作系统选择不同的收集方法
 	if runtime.GOOS == "windows" {
 		records, err = c.collectWindows(ctx, opts)
 	} else {
@@ -65,10 +71,11 @@ func (c *ProcessListCollector) Collect(ctx context.Context, opts *Options) (*Res
 	return result, nil
 }
 
+// collectLinux 在 Linux 系统上收集进程信息，通过读取 /proc 文件系统
 func (c *ProcessListCollector) collectLinux(ctx context.Context, opts *Options) ([]Record, error) {
 	var records []Record
 
-	// Read /proc filesystem
+	// 读取 /proc 目录获取所有进程
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read /proc: %w", err)
@@ -79,9 +86,10 @@ func (c *ProcessListCollector) collectLinux(ctx context.Context, opts *Options) 
 			continue
 		}
 
+		// 尝试将目录名解析为 PID（只有数字目录才是进程目录）
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
-			continue // Not a process directory
+			continue // 不是进程目录，跳过
 		}
 
 		record, err := c.readLinuxProcessInfo(pid)
@@ -98,24 +106,26 @@ func (c *ProcessListCollector) collectLinux(ctx context.Context, opts *Options) 
 	return records, nil
 }
 
+// readLinuxProcessInfo 读取单个 Linux 进程的详细信息
 func (c *ProcessListCollector) readLinuxProcessInfo(pid int) (*Record, error) {
 	procPath := fmt.Sprintf("/proc/%d", pid)
 
-	// Read command line
+	// 读取命令行参数
 	cmdline, err := os.ReadFile(procPath + "/cmdline")
 	if err != nil {
 		return nil, err
 	}
+	// 命令行参数以空字符分隔，转换为空格分隔
 	cmdlineStr := strings.ReplaceAll(string(cmdline), "\x00", " ")
 	cmdlineStr = strings.TrimSpace(cmdlineStr)
 
-	// Read status
+	// 读取进程状态信息
 	status, err := os.ReadFile(procPath + "/status")
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse status
+	// 解析 status 文件中的关键字段
 	data := make(map[string]interface{})
 	data["pid"] = pid
 
@@ -134,6 +144,7 @@ func (c *ProcessListCollector) readLinuxProcessInfo(pid int) (*Record, error) {
 		case "PPid":
 			data["ppid"], _ = strconv.Atoi(value)
 		case "Uid":
+			// Uid 字段包含多个值：真实UID、有效UID、保存UID、文件系统UID
 			uids := strings.Fields(value)
 			if len(uids) > 0 {
 				data["uid"] = uids[0]
@@ -150,40 +161,40 @@ func (c *ProcessListCollector) readLinuxProcessInfo(pid int) (*Record, error) {
 
 	data["cmdline"] = cmdlineStr
 
-	// Read exe symlink
+	// 读取可执行文件符号链接，获取实际路径
 	exe, err := os.Readlink(procPath + "/exe")
 	if err == nil {
 		data["exe"] = exe
-		// Extract path from exe (remove deleted suffix)
+		// 检查可执行文件是否已被删除（恶意软件常见行为）
 		if strings.HasSuffix(exe, " (deleted)") {
 			data["exe_deleted"] = true
 			data["exe"] = strings.TrimSuffix(exe, " (deleted)")
 		}
 	}
 
-	// Read cwd symlink
+	// 读取当前工作目录
 	cwd, err := os.Readlink(procPath + "/cwd")
 	if err == nil {
 		data["cwd"] = cwd
 	}
 
-	// Read environment variables (optional)
+	// 读取环境变量数量（可选）
 	env, err := os.ReadFile(procPath + "/environ")
 	if err == nil {
 		envVars := strings.Split(string(env), "\x00")
 		data["env_count"] = len(envVars)
 	}
 
-	// Read stat for additional info
+	// 读取 stat 文件获取额外信息（如进程状态、启动时间）
 	stat, err := os.ReadFile(procPath + "/stat")
 	if err == nil {
 		statParts := strings.Fields(string(stat))
 		if len(statParts) >= 20 {
 			data["state"] = statParts[2]
-			// Parse start time (field 22, in clock ticks)
+			// 解析启动时间（第22个字段，单位为时钟滴答）
 			if starttime, err := strconv.ParseInt(statParts[21], 10, 64); err == nil {
-				// Convert to seconds since boot
-				data["start_time"] = starttime / 100 // Approximate
+				// 转换为自启动以来的秒数
+				data["start_time"] = starttime / 100 // 近似值
 			}
 		}
 	}
@@ -195,21 +206,21 @@ func (c *ProcessListCollector) readLinuxProcessInfo(pid int) (*Record, error) {
 	}, nil
 }
 
+// collectWindows 在 Windows 系统上收集进程信息，使用 wmic 或 tasklist 命令
 func (c *ProcessListCollector) collectWindows(ctx context.Context, opts *Options) ([]Record, error) {
 	var records []Record
 
-	// Use wmic or tasklist for process information
-	// Try wmic first for more detailed info
+	// 优先使用 wmic 获取更详细的进程信息
 	cmd := exec.CommandContext(ctx, "wmic", "process", "get",
 		"ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate",
 		"/format:csv")
 	output, err := cmd.Output()
 	if err != nil {
-		// Fallback to tasklist
+		// 如果 wmic 失败，回退到 tasklist
 		return c.collectWindowsTasklist(ctx, opts)
 	}
 
-	// Parse CSV output using proper CSV reader to handle quoted fields
+	// 使用 CSV 解析器处理输出，正确处理引号字段
 	csvReader := csv.NewReader(strings.NewReader(string(output)))
 	lineNum := 0
 	for {
@@ -222,24 +233,24 @@ func (c *ProcessListCollector) collectWindows(ctx context.Context, opts *Options
 		}
 		lineNum++
 
-		// Skip header lines (first 2 lines)
+		// 跳过前两行标题
 		if lineNum <= 2 {
 			continue
 		}
 
-		// CSV format: Node,CommandLine,CreationDate,ExecutablePath,Name,ParentProcessId,ProcessId
+		// CSV 格式：Node,CommandLine,CreationDate,ExecutablePath,Name,ParentProcessId,ProcessId
 		if len(fields) < 7 {
 			continue
 		}
 
 		data := make(map[string]interface{})
 
-		// Parse PID
+		// 解析 PID
 		if pid, err := strconv.Atoi(fields[6]); err == nil {
 			data["pid"] = pid
 		}
 
-		// Parse PPID
+		// 解析父进程 ID
 		if ppid, err := strconv.Atoi(fields[5]); err == nil {
 			data["ppid"] = ppid
 		}
@@ -259,6 +270,7 @@ func (c *ProcessListCollector) collectWindows(ctx context.Context, opts *Options
 	return records, nil
 }
 
+// collectWindowsTasklist 使用 tasklist 命令收集进程信息（作为 wmic 的备选方案）
 func (c *ProcessListCollector) collectWindowsTasklist(ctx context.Context, opts *Options) ([]Record, error) {
 	var records []Record
 
@@ -271,11 +283,11 @@ func (c *ProcessListCollector) collectWindowsTasklist(ctx context.Context, opts 
 	lines := strings.Split(string(output), "\n")
 	for i, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || i == 0 { // Skip header
+		if line == "" || i == 0 { // 跳过标题行
 			continue
 		}
 
-		// Parse CSV: "Image Name","PID","Session Name","Session#","Mem Usage","Status","User Name","CPU Time","Window Title"
+		// CSV 格式："Image Name","PID","Session Name","Session#","Mem Usage","Status","User Name","CPU Time","Window Title"
 		fields := strings.Split(line, ",")
 		if len(fields) < 4 {
 			continue
@@ -283,7 +295,7 @@ func (c *ProcessListCollector) collectWindowsTasklist(ctx context.Context, opts 
 
 		data := make(map[string]interface{})
 
-		// Clean up quoted fields
+		// 清理引号包裹的字段
 		name := strings.Trim(fields[0], "\"")
 		pidStr := strings.Trim(fields[1], "\"")
 
@@ -294,7 +306,7 @@ func (c *ProcessListCollector) collectWindowsTasklist(ctx context.Context, opts 
 
 		if len(fields) > 4 {
 			memStr := strings.Trim(fields[4], "\"")
-			// Parse memory usage (e.g., "123,456 K")
+			// 解析内存使用量（格式如 "123,456 K"）
 			memStr = strings.ReplaceAll(memStr, ",", "")
 			memStr = strings.ReplaceAll(memStr, " K", "")
 			if mem, err := strconv.ParseInt(memStr, 10, 64); err == nil {
@@ -316,36 +328,41 @@ func (c *ProcessListCollector) collectWindowsTasklist(ctx context.Context, opts 
 	return records, nil
 }
 
-// ProcessTreeCollector collects process tree structure
+// ProcessTreeCollector 进程树收集器，用于收集进程的父子关系结构
 type ProcessTreeCollector struct{}
 
+// Name 返回收集器名称
 func (c *ProcessTreeCollector) Name() string {
 	return "process.tree"
 }
 
+// Description 返回收集器描述
 func (c *ProcessTreeCollector) Description() string {
 	return "Collects process tree structure showing parent-child relationships"
 }
 
+// Platform 返回支持的平台
 func (c *ProcessTreeCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *ProcessTreeCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 收集进程树结构，展示父子进程关系
 func (c *ProcessTreeCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 
-	// First collect process list
+	// 首先收集进程列表
 	plc := &ProcessListCollector{}
 	plResult, err := plc.Collect(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build tree structure
+	// 构建进程树结构
 	tree := c.buildTree(plResult.Records)
 
 	result := &Result{
@@ -363,9 +380,11 @@ func (c *ProcessTreeCollector) Collect(ctx context.Context, opts *Options) (*Res
 	return result, nil
 }
 
+// buildTree 根据进程列表构建父子关系树
 func (c *ProcessTreeCollector) buildTree(records []Record) []Record {
-	// Build parent-child relationships
+	// 建立 PID 到进程数据的映射
 	pidMap := make(map[int]map[string]interface{})
+	// 建立父进程到子进程列表的映射
 	childrenMap := make(map[int][]int)
 
 	for _, r := range records {
@@ -382,7 +401,7 @@ func (c *ProcessTreeCollector) buildTree(records []Record) []Record {
 		childrenMap[ppid] = append(childrenMap[ppid], pid)
 	}
 
-	// Build tree records
+	// 构建进程树记录
 	var tree []Record
 	for pid, data := range pidMap {
 		ppid, _ := data["ppid"].(int)
@@ -407,25 +426,30 @@ func (c *ProcessTreeCollector) buildTree(records []Record) []Record {
 	return tree
 }
 
-// ProcessOpenFilesCollector collects open files by processes
+// ProcessOpenFilesCollector 进程打开文件收集器，收集各进程打开的文件列表
 type ProcessOpenFilesCollector struct{}
 
+// Name 返回收集器名称
 func (c *ProcessOpenFilesCollector) Name() string {
 	return "process.open_files"
 }
 
+// Description 返回收集器描述
 func (c *ProcessOpenFilesCollector) Description() string {
 	return "Collects list of open files by each process"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *ProcessOpenFilesCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *ProcessOpenFilesCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集进程打开的文件信息，通过读取 /proc/[pid]/fd 目录
 func (c *ProcessOpenFilesCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
@@ -445,6 +469,7 @@ func (c *ProcessOpenFilesCollector) Collect(ctx context.Context, opts *Options) 
 			continue
 		}
 
+		// 读取进程的文件描述符目录
 		fdPath := fmt.Sprintf("/proc/%d/fd", pid)
 		fds, err := os.ReadDir(fdPath)
 		if err != nil {
@@ -458,7 +483,7 @@ func (c *ProcessOpenFilesCollector) Collect(ctx context.Context, opts *Options) 
 				continue
 			}
 
-			// Skip anonymous inodes and pipes
+			// 跳过匿名 inode、管道和 socket
 			if strings.HasPrefix(target, "pipe:") ||
 				strings.HasPrefix(target, "socket:") ||
 				strings.HasPrefix(target, "anon_inode:") {
@@ -489,30 +514,35 @@ func (c *ProcessOpenFilesCollector) Collect(ctx context.Context, opts *Options) 
 	return result, nil
 }
 
-// ProcessModulesCollector collects loaded modules/DLLs by processes (Windows)
+// ProcessModulesCollector 进程模块收集器，收集进程加载的模块/DLL（仅 Windows）
 type ProcessModulesCollector struct{}
 
+// Name 返回收集器名称
 func (c *ProcessModulesCollector) Name() string {
 	return "process.modules"
 }
 
+// Description 返回收集器描述
 func (c *ProcessModulesCollector) Description() string {
 	return "Collects loaded modules/DLLs by each process (Windows only)"
 }
 
+// Platform 返回支持的平台（仅 Windows）
 func (c *ProcessModulesCollector) Platform() string {
 	return "windows"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *ProcessModulesCollector) IsAvailable() bool {
 	return runtime.GOOS == "windows"
 }
 
+// Collect 收集进程模块信息
 func (c *ProcessModulesCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Use wmic to get loaded modules
+	// 使用 wmic 获取进程信息
 	cmd := exec.CommandContext(ctx, "wmic", "process", "get", "ProcessId,Name,ExecutablePath",
 		"/format:csv")
 	output, err := cmd.Output()
@@ -520,7 +550,7 @@ func (c *ProcessModulesCollector) Collect(ctx context.Context, opts *Options) (*
 		return nil, fmt.Errorf("failed to get process list: %w", err)
 	}
 
-	// Parse and collect module info
+	// 解析输出
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -567,30 +597,36 @@ func (c *ProcessModulesCollector) Collect(ctx context.Context, opts *Options) (*
 	return result, nil
 }
 
-// ProcessMemoryCollector collects process memory information
+// ProcessMemoryCollector 进程内存收集器，收集各进程的内存使用信息
 type ProcessMemoryCollector struct{}
 
+// Name 返回收集器名称
 func (c *ProcessMemoryCollector) Name() string {
 	return "process.memory"
 }
 
+// Description 返回收集器描述
 func (c *ProcessMemoryCollector) Description() string {
 	return "Collects memory usage information for each process"
 }
 
+// Platform 返回支持的平台
 func (c *ProcessMemoryCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *ProcessMemoryCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 收集进程内存使用信息
 func (c *ProcessMemoryCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
 	if runtime.GOOS == "linux" {
+		// Linux: 通过 /proc/[pid]/status 读取内存信息
 		entries, err := os.ReadDir("/proc")
 		if err != nil {
 			return nil, fmt.Errorf("failed to read /proc: %w", err)
@@ -606,7 +642,7 @@ func (c *ProcessMemoryCollector) Collect(ctx context.Context, opts *Options) (*R
 				continue
 			}
 
-			// Read /proc/[pid]/status for memory info
+			// 读取进程状态文件获取内存信息
 			status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
 			if err != nil {
 				continue
@@ -649,7 +685,7 @@ func (c *ProcessMemoryCollector) Collect(ctx context.Context, opts *Options) (*R
 			})
 		}
 	} else {
-		// Windows: use tasklist
+		// Windows: 使用 tasklist 获取内存信息
 		cmd := exec.CommandContext(ctx, "tasklist", "/fo", "csv")
 		output, err := cmd.Output()
 		if err != nil {
@@ -678,9 +714,9 @@ func (c *ProcessMemoryCollector) Collect(ctx context.Context, opts *Options) (*R
 					Timestamp: time.Now(),
 					Source:    "tasklist",
 					Data: map[string]interface{}{
-						"pid":        pid,
-						"name":       name,
-						"memory_kb":  mem,
+						"pid":       pid,
+						"name":      name,
+						"memory_kb": mem,
 					},
 				})
 			}
@@ -699,8 +735,8 @@ func (c *ProcessMemoryCollector) Collect(ctx context.Context, opts *Options) (*R
 	return result, nil
 }
 
+// parseMemoryValue 解析内存值字符串（如 "12345 kB"）
 func parseMemoryValue(value string) int64 {
-	// Parse memory values like "12345 kB"
 	parts := strings.Fields(value)
 	if len(parts) == 0 {
 		return 0

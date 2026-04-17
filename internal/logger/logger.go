@@ -1,4 +1,5 @@
-// Package logger provides structured logging for IntrusionScope
+// Package logger 提供 IntrusionScope 的结构化日志功能。
+// 支持 JSON 和 Text 两种输出格式。
 package logger
 
 import (
@@ -11,20 +12,21 @@ import (
 	"time"
 )
 
-// Level represents log level
+// Level 日志级别
 type Level int
 
 const (
-	// Debug level
+	// Debug 调试级别
 	Debug Level = iota
-	// Info level
+	// Info 信息级别
 	Info
-	// Warn level
+	// Warn 警告级别
 	Warn
-	// Error level
+	// Error 错误级别
 	Error
 )
 
+// String 返回日志级别的字符串表示
 func (l Level) String() string {
 	switch l {
 	case Debug:
@@ -40,16 +42,16 @@ func (l Level) String() string {
 	}
 }
 
-// Logger provides structured logging
+// Logger 结构化日志记录器
 type Logger struct {
-	level     Level
-	format    string // "json" or "text"
-	writer    io.Writer
-	mu        sync.Mutex
-	fields    map[string]interface{}
+	level     Level                   // 日志级别
+	format    string                  // 输出格式："json" 或 "text"
+	writer    io.Writer               // 输出目标
+	mu        sync.Mutex              // 互斥锁
+	fields    map[string]interface{}  // 附加字段
 }
 
-// New creates a new logger
+// New 创建新的日志记录器
 func New(verbose bool) *Logger {
 	level := Info
 	if verbose {
@@ -64,7 +66,7 @@ func New(verbose bool) *Logger {
 	}
 }
 
-// NewWithConfig creates a logger with specific configuration
+// NewWithConfig 使用指定配置创建日志记录器
 func NewWithConfig(level string, format string, writer io.Writer) *Logger {
 	l := Info
 	switch level {
@@ -88,7 +90,7 @@ func NewWithConfig(level string, format string, writer io.Writer) *Logger {
 	}
 }
 
-// WithFields returns a new logger with additional fields
+// WithFields 返回带有附加字段的新日志记录器
 func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 	newLogger := &Logger{
 		level:  l.level,
@@ -97,12 +99,12 @@ func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 		fields: make(map[string]interface{}),
 	}
 
-	// Copy existing fields
+	// 复制现有字段
 	for k, v := range l.fields {
 		newLogger.fields[k] = v
 	}
 
-	// Add new fields
+	// 添加新字段
 	for k, v := range fields {
 		newLogger.fields[k] = v
 	}
@@ -110,7 +112,7 @@ func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 	return newLogger
 }
 
-// log writes a log entry
+// log 写入日志条目
 func (l *Logger) log(level Level, msg string, args ...interface{}) {
 	if level < l.level {
 		return
@@ -119,19 +121,19 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Build entry with base fields
+	// 构建日志条目
 	entry := map[string]interface{}{
 		"timestamp": time.Now().Format(time.RFC3339),
 		"level":     level.String(),
 		"message":   msg,
 	}
 
-	// Add existing fields
+	// 添加现有字段
 	for k, v := range l.fields {
 		entry[k] = v
 	}
 
-	// Process args as key-value pairs (must be even number)
+	// 处理键值对参数（必须为偶数个）
 	for i := 0; i < len(args)-1; i += 2 {
 		if key, ok := args[i].(string); ok {
 			entry[key] = args[i+1]
@@ -146,7 +148,7 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 		}
 		fmt.Fprintln(l.writer, string(data))
 	} else {
-		// Text format
+		// Text 格式
 		fmt.Fprintf(l.writer, "[%s] %s: %s", entry["timestamp"], level.String(), entry["message"])
 		for k, v := range l.fields {
 			fmt.Fprintf(l.writer, " %s=%v", k, v)
@@ -155,27 +157,27 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 	}
 }
 
-// Debug logs a debug message
+// Debug 记录调试消息
 func (l *Logger) Debug(msg string, args ...interface{}) {
 	l.log(Debug, msg, args...)
 }
 
-// Info logs an info message
+// Info 记录信息消息
 func (l *Logger) Info(msg string, args ...interface{}) {
 	l.log(Info, msg, args...)
 }
 
-// Warn logs a warning message
+// Warn 记录警告消息
 func (l *Logger) Warn(msg string, args ...interface{}) {
 	l.log(Warn, msg, args...)
 }
 
-// Error logs an error message
+// Error 记录错误消息
 func (l *Logger) Error(msg string, args ...interface{}) {
 	l.log(Error, msg, args...)
 }
 
-// Fatal logs an error message and exits
+// Fatal 记录错误消息并退出程序
 func (l *Logger) Fatal(msg string, args ...interface{}) {
 	l.log(Error, msg, args...)
 	os.Exit(1)

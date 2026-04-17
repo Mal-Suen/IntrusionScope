@@ -1,5 +1,5 @@
-// Package collector provides forensic artifact collection capabilities
-// This file contains filesystem-related collectors
+// Package collector 提供取证工件收集能力
+// 本文件包含文件系统相关的收集器实现
 package collector
 
 import (
@@ -20,39 +20,45 @@ import (
 	"time"
 )
 
-// FilesystemRecentFilesCollector collects recently modified files
+// FilesystemRecentFilesCollector 最近修改文件收集器，收集最近修改的文件信息
 type FilesystemRecentFilesCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemRecentFilesCollector) Name() string {
 	return "filesystem.recent_files"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemRecentFilesCollector) Description() string {
 	return "Collects recently modified files"
 }
 
+// Platform 返回支持的平台
 func (c *FilesystemRecentFilesCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemRecentFilesCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 收集最近修改的文件信息
 func (c *FilesystemRecentFilesCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Default: files modified in last 7 days
+	// 默认收集最近 7 天修改的文件
 	daysBack := 7
 	if opts != nil && opts.DaysBack > 0 {
 		daysBack = opts.DaysBack
 	}
 	cutoff := start.AddDate(0, 0, -daysBack)
 
-	// Directories to scan
+	// 根据操作系统确定扫描目录
 	var scanDirs []string
 	if runtime.GOOS == "windows" {
+		// Windows: 扫描用户目录、系统临时目录等
 		userProfile := os.Getenv("USERPROFILE")
 		systemRoot := os.Getenv("SystemRoot")
 		temp := os.Getenv("TEMP")
@@ -67,6 +73,7 @@ func (c *FilesystemRecentFilesCollector) Collect(ctx context.Context, opts *Opti
 			scanDirs = append(scanDirs, temp)
 		}
 	} else {
+		// Linux: 扫描临时目录和用户主目录
 		scanDirs = []string{
 			"/tmp",
 			"/var/tmp",
@@ -74,6 +81,7 @@ func (c *FilesystemRecentFilesCollector) Collect(ctx context.Context, opts *Opti
 		}
 	}
 
+	// 遍历目录收集文件信息
 	for _, dir := range scanDirs {
 		if dir == "" {
 			continue
@@ -84,16 +92,17 @@ func (c *FilesystemRecentFilesCollector) Collect(ctx context.Context, opts *Opti
 				return nil
 			}
 
+			// 只收集在截止时间之后修改的文件
 			if info.ModTime().After(cutoff) {
 				records = append(records, Record{
 					Timestamp: time.Now(),
 					Source:    "filesystem_walk",
 					Data: map[string]interface{}{
-						"path":       path,
-						"size":       info.Size(),
-						"mod_time":   info.ModTime().Format(time.RFC3339),
-						"is_dir":     info.IsDir(),
-						"mode":       info.Mode().String(),
+						"path":     path,
+						"size":     info.Size(),
+						"mod_time": info.ModTime().Format(time.RFC3339),
+						"is_dir":   info.IsDir(),
+						"mode":     info.Mode().String(),
 					},
 				})
 			}
@@ -112,29 +121,35 @@ func (c *FilesystemRecentFilesCollector) Collect(ctx context.Context, opts *Opti
 	}, nil
 }
 
-// FilesystemFileHashCollector computes hashes for files
+// FilesystemFileHashCollector 文件哈希收集器，计算指定文件的 MD5、SHA1、SHA256 哈希值
 type FilesystemFileHashCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemFileHashCollector) Name() string {
 	return "filesystem.file_hash"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemFileHashCollector) Description() string {
 	return "Computes MD5, SHA1, SHA256 hashes for specified files"
 }
 
+// Platform 返回支持的平台
 func (c *FilesystemFileHashCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemFileHashCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 计算指定文件的哈希值
 func (c *FilesystemFileHashCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
+	// 检查是否指定了目标文件
 	if opts == nil || len(opts.TargetFiles) == 0 {
 		return &Result{
 			Collector: c.Name(),
@@ -144,9 +159,11 @@ func (c *FilesystemFileHashCollector) Collect(ctx context.Context, opts *Options
 		}, nil
 	}
 
+	// 遍历目标文件计算哈希
 	for _, filePath := range opts.TargetFiles {
 		hashes, err := c.computeHashes(filePath)
 		if err != nil {
+			// 记录错误信息
 			records = append(records, Record{
 				Timestamp: time.Now(),
 				Source:    "file_hash",
@@ -175,6 +192,7 @@ func (c *FilesystemFileHashCollector) Collect(ctx context.Context, opts *Options
 	}, nil
 }
 
+// computeHashes 计算单个文件的多种哈希值
 func (c *FilesystemFileHashCollector) computeHashes(filePath string) (map[string]interface{}, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -187,53 +205,60 @@ func (c *FilesystemFileHashCollector) computeHashes(filePath string) (map[string
 		return nil, err
 	}
 
+	// 创建多个哈希计算器
 	md5Hash := md5.New()
 	sha1Hash := sha1.New()
 	sha256Hash := sha256.New()
 
+	// 使用 MultiWriter 同时计算多个哈希
 	multiWriter := io.MultiWriter(md5Hash, sha1Hash, sha256Hash)
 	if _, err := io.Copy(multiWriter, file); err != nil {
 		return nil, err
 	}
 
 	return map[string]interface{}{
-		"path":      filePath,
-		"size":      stat.Size(),
-		"mod_time":  stat.ModTime().Format(time.RFC3339),
-		"md5":       hex.EncodeToString(md5Hash.Sum(nil)),
-		"sha1":      hex.EncodeToString(sha1Hash.Sum(nil)),
-		"sha256":    hex.EncodeToString(sha256Hash.Sum(nil)),
+		"path":     filePath,
+		"size":     stat.Size(),
+		"mod_time": stat.ModTime().Format(time.RFC3339),
+		"md5":      hex.EncodeToString(md5Hash.Sum(nil)),
+		"sha1":     hex.EncodeToString(sha1Hash.Sum(nil)),
+		"sha256":   hex.EncodeToString(sha256Hash.Sum(nil)),
 	}, nil
 }
 
-// FilesystemMFTCollector collects NTFS MFT entries (Windows)
+// FilesystemMFTCollector NTFS MFT 收集器，收集 NTFS 主文件表条目（仅 Windows）
 type FilesystemMFTCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemMFTCollector) Name() string {
 	return "filesystem.mft"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemMFTCollector) Description() string {
 	return "Collects NTFS MFT entries (Windows only)"
 }
 
+// Platform 返回支持的平台（仅 Windows）
 func (c *FilesystemMFTCollector) Platform() string {
 	return "windows"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemMFTCollector) IsAvailable() bool {
 	return runtime.GOOS == "windows"
 }
 
+// Collect 收集 NTFS MFT 条目
 func (c *FilesystemMFTCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Use fsutil to get USN journal entries
+	// 使用 fsutil 读取 USN 日志条目
 	cmd := exec.CommandContext(ctx, "fsutil", "usn", "readjournal", "C:")
 	output, err := cmd.Output()
 	if err != nil {
-		// Fallback: just record that MFT collection requires admin
+		// MFT 收集需要管理员权限
 		return &Result{
 			Collector: c.Name(),
 			Timestamp: start,
@@ -242,7 +267,7 @@ func (c *FilesystemMFTCollector) Collect(ctx context.Context, opts *Options) (*R
 		}, nil
 	}
 
-	// Parse USN journal output
+	// 解析 USN 日志输出
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -269,33 +294,38 @@ func (c *FilesystemMFTCollector) Collect(ctx context.Context, opts *Options) (*R
 	}, nil
 }
 
-// FilesystemBashHistoryCollector collects bash command history
+// FilesystemBashHistoryCollector Bash 命令历史收集器，收集所有用户的 bash 命令历史
 type FilesystemBashHistoryCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemBashHistoryCollector) Name() string {
 	return "filesystem.bash_history"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemBashHistoryCollector) Description() string {
 	return "Collects bash command history for all users"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *FilesystemBashHistoryCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemBashHistoryCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集所有用户的 bash 命令历史
 func (c *FilesystemBashHistoryCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Find all users' home directories
+	// 查找所有用户的主目录
 	homeDirs := []string{}
 
-	// Read /etc/passwd to find home directories
+	// 从 /etc/passwd 读取用户主目录
 	passwd, err := os.Open("/etc/passwd")
 	if err == nil {
 		scanner := bufio.NewScanner(passwd)
@@ -312,7 +342,7 @@ func (c *FilesystemBashHistoryCollector) Collect(ctx context.Context, opts *Opti
 		passwd.Close()
 	}
 
-	// Also check /home
+	// 同时检查 /home 目录下的用户
 	homeEntries, _ := os.ReadDir("/home")
 	for _, entry := range homeEntries {
 		if entry.IsDir() {
@@ -320,16 +350,17 @@ func (c *FilesystemBashHistoryCollector) Collect(ctx context.Context, opts *Opti
 		}
 	}
 
-	// Read bash history for each user
+	// 读取每个用户的 shell 历史文件
 	for _, homeDir := range homeDirs {
+		// 读取 .bash_history
 		historyPath := homeDir + "/.bash_history"
 		c.readHistoryFile(historyPath, homeDir, &records)
 
-		// Also check .zsh_history
+		// 读取 .zsh_history（zsh shell）
 		zshHistoryPath := homeDir + "/.zsh_history"
 		c.readHistoryFile(zshHistoryPath, homeDir, &records)
 
-		// And .sh_history (ksh)
+		// 读取 .sh_history（ksh shell）
 		shHistoryPath := homeDir + "/.sh_history"
 		c.readHistoryFile(shHistoryPath, homeDir, &records)
 	}
@@ -344,6 +375,7 @@ func (c *FilesystemBashHistoryCollector) Collect(ctx context.Context, opts *Opti
 	}, nil
 }
 
+// readHistoryFile 读取单个历史文件内容
 func (c *FilesystemBashHistoryCollector) readHistoryFile(path, homeDir string, records *[]Record) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -366,43 +398,48 @@ func (c *FilesystemBashHistoryCollector) readHistoryFile(path, homeDir string, r
 			Timestamp: time.Now(),
 			Source:    "bash_history",
 			Data: map[string]interface{}{
-				"user":       filepath.Base(homeDir),
-				"home_dir":   homeDir,
-				"history":    path,
-				"line":       lineNum,
-				"command":    line,
+				"user":     filepath.Base(homeDir),
+				"home_dir": homeDir,
+				"history":  path,
+				"line":     lineNum,
+				"command":  line,
 			},
 		})
 	}
 }
 
-// FilesystemCronJobsCollector collects cron jobs
+// FilesystemCronJobsCollector Cron 任务收集器，收集定时任务定义
 type FilesystemCronJobsCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemCronJobsCollector) Name() string {
 	return "filesystem.cron_jobs"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemCronJobsCollector) Description() string {
 	return "Collects cron job definitions"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *FilesystemCronJobsCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemCronJobsCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集 cron 任务定义
 func (c *FilesystemCronJobsCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Read system crontab
+	// 读取系统 crontab
 	c.readCrontab("/etc/crontab", "system", &records)
 
-	// Read cron.d directory
+	// 读取 cron.d 目录下的任务
 	cronDEntries, _ := os.ReadDir("/etc/cron.d")
 	for _, entry := range cronDEntries {
 		if !entry.IsDir() {
@@ -410,7 +447,7 @@ func (c *FilesystemCronJobsCollector) Collect(ctx context.Context, opts *Options
 		}
 	}
 
-	// Read user crontabs from /var/spool/cron/crontabs
+	// 读取用户 crontabs
 	crontabsDir := "/var/spool/cron/crontabs"
 	crontabEntries, err := os.ReadDir(crontabsDir)
 	if err == nil {
@@ -422,7 +459,7 @@ func (c *FilesystemCronJobsCollector) Collect(ctx context.Context, opts *Options
 		}
 	}
 
-	// Read cron.daily, cron.hourly, etc.
+	// 读取周期性任务目录（cron.daily, cron.hourly 等）
 	for _, period := range []string{"hourly", "daily", "weekly", "monthly"} {
 		dir := "/etc/cron." + period
 		entries, err := os.ReadDir(dir)
@@ -435,9 +472,9 @@ func (c *FilesystemCronJobsCollector) Collect(ctx context.Context, opts *Options
 					Timestamp: time.Now(),
 					Source:    "cron_period",
 					Data: map[string]interface{}{
-						"period":    period,
-						"file":      dir + "/" + entry.Name(),
-						"name":      entry.Name(),
+						"period": period,
+						"file":   dir + "/" + entry.Name(),
+						"name":   entry.Name(),
 					},
 				})
 			}
@@ -454,6 +491,7 @@ func (c *FilesystemCronJobsCollector) Collect(ctx context.Context, opts *Options
 	}, nil
 }
 
+// readCrontab 读取单个 crontab 文件
 func (c *FilesystemCronJobsCollector) readCrontab(path, source string, records *[]Record) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -468,7 +506,7 @@ func (c *FilesystemCronJobsCollector) readCrontab(path, source string, records *
 		line := scanner.Text()
 		lineNum++
 
-		// Skip comments and empty lines
+		// 跳过注释和空行
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -478,45 +516,51 @@ func (c *FilesystemCronJobsCollector) readCrontab(path, source string, records *
 			Timestamp: time.Now(),
 			Source:    "crontab",
 			Data: map[string]interface{}{
-				"file":      path,
-				"line":      lineNum,
-				"job":       line,
-				"owner":     source,
+				"file":  path,
+				"line":  lineNum,
+				"job":   line,
+				"owner": source,
 			},
 		})
 	}
 }
 
-// FilesystemSystemdServicesCollector collects systemd service files
+// FilesystemSystemdServicesCollector Systemd 服务收集器，收集 systemd 服务定义
 type FilesystemSystemdServicesCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemSystemdServicesCollector) Name() string {
 	return "filesystem.systemd_services"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemSystemdServicesCollector) Description() string {
 	return "Collects systemd service definitions"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *FilesystemSystemdServicesCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemSystemdServicesCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集 systemd 服务定义
 func (c *FilesystemSystemdServicesCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Directories to scan for service files
+	// 服务文件目录
 	serviceDirs := []string{
 		"/etc/systemd/system",
 		"/lib/systemd/system",
 		"/usr/lib/systemd/system",
 	}
 
+	// 遍历目录收集 .service 文件
 	for _, dir := range serviceDirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -528,7 +572,7 @@ func (c *FilesystemSystemdServicesCollector) Collect(ctx context.Context, opts *
 			if strings.HasSuffix(name, ".service") {
 				servicePath := dir + "/" + name
 
-				// Read service file content
+				// 读取服务文件内容
 				content, err := os.ReadFile(servicePath)
 				if err != nil {
 					continue
@@ -547,7 +591,7 @@ func (c *FilesystemSystemdServicesCollector) Collect(ctx context.Context, opts *
 		}
 	}
 
-	// Also get active services using systemctl
+	// 使用 systemctl 获取活动服务状态
 	cmd := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager")
 	output, err := cmd.Output()
 	if err == nil {
@@ -582,30 +626,35 @@ func (c *FilesystemSystemdServicesCollector) Collect(ctx context.Context, opts *
 	}, nil
 }
 
-// FilesystemScheduledTasksCollector collects Windows scheduled tasks
+// FilesystemScheduledTasksCollector Windows 计划任务收集器
 type FilesystemScheduledTasksCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemScheduledTasksCollector) Name() string {
 	return "filesystem.scheduled_tasks"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemScheduledTasksCollector) Description() string {
 	return "Collects Windows scheduled tasks"
 }
 
+// Platform 返回支持的平台（仅 Windows）
 func (c *FilesystemScheduledTasksCollector) Platform() string {
 	return "windows"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemScheduledTasksCollector) IsAvailable() bool {
 	return runtime.GOOS == "windows"
 }
 
+// Collect 收集 Windows 计划任务
 func (c *FilesystemScheduledTasksCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Use schtasks to list tasks
+	// 使用 schtasks 命令列出任务
 	cmd := exec.CommandContext(ctx, "schtasks", "/query", "/fo", "csv", "/v")
 	output, err := cmd.Output()
 	if err != nil {
@@ -629,17 +678,19 @@ func (c *FilesystemScheduledTasksCollector) Collect(ctx context.Context, opts *O
 			continue
 		}
 
-		// Parse CSV line
+		// 解析 CSV 行
 		fields := strings.Split(line, ",")
 		for i := range fields {
 			fields[i] = strings.Trim(fields[i], "\"")
 		}
 
 		if lineNum == 1 {
+			// 第一行为标题行
 			headers = fields
 			continue
 		}
 
+		// 构建记录数据
 		data := make(map[string]interface{})
 		for i, field := range fields {
 			if i < len(headers) {
@@ -664,33 +715,38 @@ func (c *FilesystemScheduledTasksCollector) Collect(ctx context.Context, opts *O
 	}, nil
 }
 
-// FilesystemAutorunsCollector collects autorun entries (Windows)
+// FilesystemAutorunsCollector Windows 自启动项收集器
 type FilesystemAutorunsCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemAutorunsCollector) Name() string {
 	return "filesystem.autoruns"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemAutorunsCollector) Description() string {
 	return "Collects Windows autorun entries"
 }
 
+// Platform 返回支持的平台（仅 Windows）
 func (c *FilesystemAutorunsCollector) Platform() string {
 	return "windows"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemAutorunsCollector) IsAvailable() bool {
 	return runtime.GOOS == "windows"
 }
 
+// Collect 收集 Windows 自启动项
 func (c *FilesystemAutorunsCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Use reg query to find autorun entries
+	// 自启动注册表位置
 	autorunKeys := []struct {
-		key   string
-		name  string
+		key  string
+		name string
 	}{
 		{"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "HKLM_Run"},
 		{"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "HKLM_RunOnce"},
@@ -699,6 +755,7 @@ func (c *FilesystemAutorunsCollector) Collect(ctx context.Context, opts *Options
 		{"HKLM\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run", "HKLM_Run_Wow64"},
 	}
 
+	// 查询每个自启动位置
 	for _, ar := range autorunKeys {
 		cmd := exec.CommandContext(ctx, "reg", "query", ar.key)
 		output, err := cmd.Output()
@@ -713,7 +770,7 @@ func (c *FilesystemAutorunsCollector) Collect(ctx context.Context, opts *Options
 				continue
 			}
 
-			// Parse REG_SZ or REG_EXPAND_SZ entries
+			// 解析 REG_SZ 或 REG_EXPAND_SZ 类型的条目
 			if strings.Contains(line, "REG_SZ") || strings.Contains(line, "REG_EXPAND_SZ") {
 				fields := strings.Fields(line)
 				if len(fields) >= 3 {
@@ -745,29 +802,35 @@ func (c *FilesystemAutorunsCollector) Collect(ctx context.Context, opts *Options
 	}, nil
 }
 
-// FilesystemDownloadsCollector collects recently downloaded files
+// FilesystemDownloadsCollector 下载文件收集器，收集最近下载的文件
 type FilesystemDownloadsCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemDownloadsCollector) Name() string {
 	return "filesystem.downloads"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemDownloadsCollector) Description() string {
 	return "Collects recently downloaded files"
 }
 
+// Platform 返回支持的平台
 func (c *FilesystemDownloadsCollector) Platform() string {
 	return "all"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemDownloadsCollector) IsAvailable() bool {
 	return true
 }
 
+// Collect 收集最近下载的文件
 func (c *FilesystemDownloadsCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
+	// 根据操作系统确定下载目录
 	var downloadDirs []string
 	if runtime.GOOS == "windows" {
 		userProfile := os.Getenv("USERPROFILE")
@@ -775,7 +838,7 @@ func (c *FilesystemDownloadsCollector) Collect(ctx context.Context, opts *Option
 			userProfile + "\\Downloads",
 		}
 	} else {
-		// Check common download locations
+		// Linux: 检查常见下载位置
 		home := os.Getenv("HOME")
 		downloadDirs = []string{
 			home + "/Downloads",
@@ -784,13 +847,14 @@ func (c *FilesystemDownloadsCollector) Collect(ctx context.Context, opts *Option
 		}
 	}
 
-	// Default: files from last 30 days
+	// 默认收集最近 30 天的下载文件
 	daysBack := 30
 	if opts != nil && opts.DaysBack > 0 {
 		daysBack = opts.DaysBack
 	}
 	cutoff := start.AddDate(0, 0, -daysBack)
 
+	// 遍历下载目录
 	for _, dir := range downloadDirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -803,6 +867,7 @@ func (c *FilesystemDownloadsCollector) Collect(ctx context.Context, opts *Option
 				continue
 			}
 
+			// 只收集在截止时间之后修改的文件
 			if info.ModTime().After(cutoff) {
 				records = append(records, Record{
 					Timestamp: time.Now(),
@@ -829,35 +894,40 @@ func (c *FilesystemDownloadsCollector) Collect(ctx context.Context, opts *Option
 	}, nil
 }
 
-// FilesystemSuidFilesCollector collects SUID/SGID files (Linux)
+// FilesystemSuidFilesCollector SUID/SGID 文件收集器，收集具有特殊权限的文件（仅 Linux）
 type FilesystemSuidFilesCollector struct{}
 
+// Name 返回收集器名称
 func (c *FilesystemSuidFilesCollector) Name() string {
 	return "filesystem.suid_files"
 }
 
+// Description 返回收集器描述
 func (c *FilesystemSuidFilesCollector) Description() string {
 	return "Collects SUID/SGID files (Linux)"
 }
 
+// Platform 返回支持的平台（仅 Linux）
 func (c *FilesystemSuidFilesCollector) Platform() string {
 	return "linux"
 }
 
+// IsAvailable 检查收集器是否可用
 func (c *FilesystemSuidFilesCollector) IsAvailable() bool {
 	return runtime.GOOS == "linux"
 }
 
+// Collect 收集 SUID/SGID 文件
 func (c *FilesystemSuidFilesCollector) Collect(ctx context.Context, opts *Options) (*Result, error) {
 	start := time.Now()
 	var records []Record
 
-	// Use find command to locate SUID files
+	// 使用 find 命令查找 SUID/SGID 文件
 	cmd := exec.CommandContext(ctx, "find", "/", "-perm", "-4000", "-o", "-perm", "-2000",
 		"-type", "f", "-ls", "2>/dev/null")
 	output, err := cmd.Output()
 	if err != nil {
-		// Fallback: scan common directories
+		// 如果 find 命令失败，回退到扫描常见目录
 		return c.scanForSuidFiles(ctx, &records)
 	}
 
@@ -866,18 +936,18 @@ func (c *FilesystemSuidFilesCollector) Collect(ctx context.Context, opts *Option
 		line := scanner.Text()
 		fields := strings.Fields(line)
 		if len(fields) >= 11 {
-			// Parse find -ls output
-			// Format: inode blocks perms links owner group size month day time/year path
+			// 解析 find -ls 输出格式
+			// 格式：inode blocks perms links owner group size month day time/year path
 			records = append(records, Record{
 				Timestamp: time.Now(),
 				Source:    "find_suid",
 				Data: map[string]interface{}{
-					"inode":  fields[0],
-					"perms":  fields[2],
-					"owner":  fields[4],
-					"group":  fields[5],
-					"size":   fields[6],
-					"path":   fields[len(fields)-1],
+					"inode": fields[0],
+					"perms": fields[2],
+					"owner": fields[4],
+					"group": fields[5],
+					"size":  fields[6],
+					"path":  fields[len(fields)-1],
 				},
 			})
 		}
@@ -893,10 +963,11 @@ func (c *FilesystemSuidFilesCollector) Collect(ctx context.Context, opts *Option
 	}, nil
 }
 
+// scanForSuidFiles 扫描常见目录查找 SUID/SGID 文件（作为 find 命令的备选方案）
 func (c *FilesystemSuidFilesCollector) scanForSuidFiles(ctx context.Context, records *[]Record) (*Result, error) {
 	start := time.Now()
 
-	// Scan common binary directories
+	// 扫描常见二进制目录
 	scanDirs := []string{"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin"}
 
 	for _, dir := range scanDirs {
@@ -912,7 +983,8 @@ func (c *FilesystemSuidFilesCollector) scanForSuidFiles(ctx context.Context, rec
 			}
 
 			mode := info.Mode()
-			if mode&04000 != 0 || mode&02000 != 0 { // SUID or SGID
+			// 检查 SUID (04000) 或 SGID (02000) 位
+			if mode&04000 != 0 || mode&02000 != 0 {
 				*records = append(*records, Record{
 					Timestamp: time.Now(),
 					Source:    "suid_scan",
@@ -937,7 +1009,7 @@ func (c *FilesystemSuidFilesCollector) scanForSuidFiles(ctx context.Context, rec
 	}, nil
 }
 
-// Helper function to parse file size
+// parseSize 解析文件大小字符串
 func parseSize(sizeStr string) int64 {
 	size, err := strconv.ParseInt(sizeStr, 10, 64)
 	if err != nil {

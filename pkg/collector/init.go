@@ -1,28 +1,28 @@
-// Package collector provides forensic artifact collection capabilities
-// This file contains the registry initialization
+// Package collector 提供取证 artifact 收集功能。
+// 此文件包含采集器的注册和初始化逻辑。
 package collector
 
 import "runtime"
 
-// init registers all built-in collectors
+// init 注册所有内置采集器
 func init() {
 	registry = NewRegistry()
 
-	// Process collectors
+	// 进程采集器
 	registry.Register(&ProcessListCollector{})
 	registry.Register(&ProcessTreeCollector{})
 	registry.Register(&ProcessOpenFilesCollector{})
 	registry.Register(&ProcessMemoryCollector{})
 	registry.Register(&ProcessModulesCollector{})
 
-	// Network collectors
+	// 网络采集器
 	registry.Register(&NetworkConnectionsCollector{})
 	registry.Register(&DNSCacheCollector{})
 	registry.Register(&ListeningPortsCollector{})
 	registry.Register(&ArpCacheCollector{})
 	registry.Register(&HostsFileCollector{})
 
-	// Filesystem collectors
+	// 文件系统采集器
 	registry.Register(&FilesystemRecentFilesCollector{})
 	registry.Register(&FilesystemDownloadsCollector{})
 	registry.Register(&FilesystemCronJobsCollector{})
@@ -32,12 +32,12 @@ func init() {
 	registry.Register(&FilesystemSuidFilesCollector{})
 	registry.Register(&FilesystemAutorunsCollector{})
 
-	// User collectors
+	// 用户采集器
 	registry.Register(&LoggedInUsersCollector{})
 	registry.Register(&SudoHistoryCollector{})
 	registry.Register(&BashHistoryCollector{})
 
-	// Registry collectors (Windows only)
+	// 注册表采集器（仅 Windows）
 	if runtime.GOOS == "windows" {
 		registry.Register(&RegistryRunKeysCollector{})
 		registry.Register(&RegistryServicesCollector{})
@@ -48,7 +48,7 @@ func init() {
 		registry.Register(&RegistrySoftwareCollector{})
 	}
 
-	// Log collectors
+	// 日志采集器
 	registry.Register(&LogAuthCollector{})
 	registry.Register(&LogSyslogCollector{})
 	registry.Register(&LogWtmpCollector{})
@@ -58,10 +58,10 @@ func init() {
 	registry.Register(&LogWebServerCollector{})
 }
 
-// Global registry instance
+// registry 全局采集器注册表实例
 var registry *Registry
 
-// GetRegistry returns the global collector registry
+// GetRegistry 返回全局采集器注册表
 func GetRegistry() *Registry {
 	return registry
 }

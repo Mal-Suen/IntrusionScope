@@ -53,10 +53,18 @@ func (c *FilesystemRecentFilesCollector) Collect(ctx context.Context, opts *Opti
 	// Directories to scan
 	var scanDirs []string
 	if runtime.GOOS == "windows" {
-		scanDirs = []string{
-			os.Getenv("USERPROFILE"),
-			os.Getenv("SystemRoot") + "\\Temp",
-			os.Getenv("TEMP"),
+		userProfile := os.Getenv("USERPROFILE")
+		systemRoot := os.Getenv("SystemRoot")
+		temp := os.Getenv("TEMP")
+
+		if userProfile != "" {
+			scanDirs = append(scanDirs, userProfile)
+		}
+		if systemRoot != "" {
+			scanDirs = append(scanDirs, filepath.Join(systemRoot, "Temp"))
+		}
+		if temp != "" {
+			scanDirs = append(scanDirs, temp)
 		}
 	} else {
 		scanDirs = []string{

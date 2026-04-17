@@ -213,6 +213,60 @@ func (c *NetworkConnectionsCollector) tcpStateToString(stateHex string) string {
 	return fmt.Sprintf("UNKNOWN(%d)", state)
 }
 
+// parseAddress parses an address in the format "IP:port" or "[IPv6]:port"
+// Returns the IP and port, or empty IP and 0 port if parsing fails
+func parseAddress(addr string) (string, int) {
+	if addr == "" || addr == "*" {
+		return "", 0
+	}
+
+	// Check for IPv6 format [address]:port
+	if strings.HasPrefix(addr, "[") {
+		// Find closing bracket
+		closeBracket := strings.Index(addr, "]")
+		if closeBracket == -1 {
+			return "", 0
+		}
+		ip := addr[1:closeBracket]
+		// Port should follow after "]:"
+		if closeBracket+2 < len(addr) && addr[closeBracket+1] == ':' {
+			port, err := strconv.Atoi(addr[closeBracket+2:])
+			if err != nil {
+				return ip, 0
+			}
+			return ip, port
+		}
+		return ip, 0
+	}
+
+	// IPv4 format: find last colon (port separator)
+	lastColon := strings.LastIndex(addr, ":")
+	if lastColon == -1 {
+		return addr, 0
+	}
+	ip := addr[:lastColon]
+	port, err := strconv.Atoi(addr[lastColon+1:])
+	if err != nil {
+		return ip, 0
+	}
+	return ip, port
+}
+
+// parseAddressWithValidation parses and validates an IP address
+func parseAddressWithValidation(addr string) (string, int, error) {
+	ip, port := parseAddress(addr)
+	if port == 0 {
+		return "", 0, fmt.Errorf("invalid address format: %s", addr)
+	}
+	// Validate IP
+	if ip != "" && ip != "*" {
+		if net.ParseIP(ip) == nil {
+			return "", 0, fmt.Errorf("invalid IP address: %s", ip)
+		}
+	}
+	return ip, port, nil
+}
+
 func (c *NetworkConnectionsCollector) mapPidsToConnections(records []Record) {
 	// Read /proc/[pid]/fd to find socket inodes
 	entries, err := os.ReadDir("/proc")
@@ -293,23 +347,17 @@ func (c *NetworkConnectionsCollector) collectWindows(ctx context.Context, opts *
 
 		proto := strings.ToLower(fields[0])
 
-		// Parse local address
-		localParts := strings.LastIndex(fields[1], ":")
-		if localParts == -1 {
+		// Parse local address (handle IPv6 format [address]:port)
+		localIP, localPort := parseAddress(fields[1])
+		if localPort == 0 {
 			continue
 		}
-		localIP := fields[1][:localParts]
-		localPort, _ := strconv.Atoi(fields[1][localParts+1:])
 
 		// Parse remote address
 		remoteIP := ""
 		remotePort := 0
 		if fields[2] != "*" && fields[2] != "" {
-			remoteParts := strings.LastIndex(fields[2], ":")
-			if remoteParts != -1 {
-				remoteIP = fields[2][:remoteParts]
-				remotePort, _ = strconv.Atoi(fields[2][remoteParts+1:])
-			}
+			remoteIP, remotePort = parseAddress(fields[2])
 		}
 
 		// Parse state

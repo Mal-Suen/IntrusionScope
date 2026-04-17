@@ -43,6 +43,12 @@ type SigmaDetection struct {
 	Timeframe   string                 `json:"timeframe"`
 }
 
+// conditionParser parses and evaluates Sigma condition expressions
+type conditionParser struct {
+	selections map[string]interface{}
+	data       map[string]interface{}
+}
+
 // NewSigmaDetector creates a new Sigma detector
 func NewSigmaDetector() *SigmaDetector {
 	return &SigmaDetector{
@@ -119,21 +125,200 @@ func (d *SigmaDetector) Detect(ctx context.Context, input *DetectionInput) (*Det
 }
 
 func (d *SigmaDetector) matchRule(rule *SigmaRule, record Record) bool {
-	// Simplified Sigma matching
-	// TODO: Implement full Sigma detection logic with condition parser
+	// Check if record type matches logsource
+	if !d.matchLogsource(rule.Logsource, record) {
+		return false
+	}
 
 	selection := rule.Detection.Selection
 	if selection == nil {
 		return false
 	}
 
-	// Check if record type matches logsource
-	if !d.matchLogsource(rule.Logsource, record) {
+	// Parse and evaluate condition
+	condition := rule.Detection.Condition
+	if condition == "" {
+		// No condition specified, use simple AND logic on all selections
+		return d.matchSelection(selection, record.Data)
+	}
+
+	// Evaluate condition expression
+	return d.evaluateCondition(condition, selection, record.Data)
+}
+
+// evaluateCondition parses and evaluates a Sigma condition expression
+// Supports: selection1, selection1 and selection2, selection1 or selection2,
+// 1 of them, all of them, count(selection) > N
+func (d *SigmaDetector) evaluateCondition(condition string, selections map[string]interface{}, data map[string]interface{}) bool {
+	condition = strings.TrimSpace(condition)
+	condition = strings.ToLower(condition)
+
+	// Handle "and" operator (lower precedence than "or")
+	if strings.Contains(condition, " and ") {
+		parts := strings.Split(condition, " and ")
+		for _, part := range parts {
+			if !d.evaluateCondition(part, selections, data) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Handle "or" operator
+	if strings.Contains(condition, " or ") {
+		parts := strings.Split(condition, " or ")
+		for _, part := range parts {
+			if d.evaluateCondition(part, selections, data) {
+				return true
+			}
+		}
 		return false
 	}
 
-	// Match selection criteria
-	return d.matchSelection(selection, record.Data)
+	// Handle "N of them" pattern
+	if strings.Contains(condition, "of them") {
+		return d.evaluateOfThem(condition, selections, data)
+	}
+
+	// Handle "N of selection*" pattern
+	if strings.Contains(condition, " of ") {
+		return d.evaluateOfPattern(condition, selections, data)
+	}
+
+	// Handle count() aggregation
+	if strings.HasPrefix(condition, "count(") {
+		return d.evaluateCount(condition, selections, data)
+	}
+
+	// Handle not operator
+	if strings.HasPrefix(condition, "not ") {
+		return !d.evaluateCondition(strings.TrimPrefix(condition, "not "), selections, data)
+	}
+
+	// Simple selection reference
+	if sel, ok := selections[condition]; ok {
+		return d.matchSelection(map[string]interface{}{condition: sel}, data)
+	}
+
+	// Check if it's a direct selection name
+	for selName := range selections {
+		if strings.EqualFold(selName, condition) {
+			return d.matchSelectionField(selName, selections[selName], data)
+		}
+	}
+
+	return false
+}
+
+// evaluateOfThem handles "N of them" conditions
+func (d *SigmaDetector) evaluateOfThem(condition string, selections map[string]interface{}, data map[string]interface{}) bool {
+	// Parse "N of them" or "all of them"
+	condition = strings.TrimSpace(condition)
+
+	var requiredCount int
+	if strings.HasPrefix(condition, "all of them") {
+		requiredCount = len(selections)
+	} else {
+		// Parse "N of them"
+		parts := strings.Fields(condition)
+		if len(parts) < 3 {
+			return false
+		}
+		var err error
+		requiredCount, err = parseInt(parts[0])
+		if err != nil {
+			return false
+		}
+	}
+
+	// Count matching selections
+	matchCount := 0
+	for selName, sel := range selections {
+		if d.matchSelectionField(selName, sel, data) {
+			matchCount++
+		}
+	}
+
+	return matchCount >= requiredCount
+}
+
+// evaluateOfPattern handles "N of selection*" conditions
+func (d *SigmaDetector) evaluateOfPattern(condition string, selections map[string]interface{}, data map[string]interface{}) bool {
+	parts := strings.Split(condition, " of ")
+	if len(parts) != 2 {
+		return false
+	}
+
+	requiredCount, err := parseInt(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return false
+	}
+
+	pattern := strings.TrimSpace(parts[1])
+	// Remove quotes if present
+	pattern = strings.Trim(pattern, "\"'")
+
+	// Find selections matching pattern
+	matchCount := 0
+	for selName, sel := range selections {
+		if matchPattern(pattern, selName) {
+			if d.matchSelectionField(selName, sel, data) {
+				matchCount++
+			}
+		}
+	}
+
+	return matchCount >= requiredCount
+}
+
+// evaluateCount handles count() aggregation conditions
+func (d *SigmaDetector) evaluateCount(condition string, selections map[string]interface{}, data map[string]interface{}) bool {
+	// Parse count(selection) > N, count(selection) < N, etc.
+	// This is a simplified implementation
+	return false // TODO: Implement count aggregation
+}
+
+// matchSelectionField matches a single selection field against data
+func (d *SigmaDetector) matchSelectionField(selName string, sel interface{}, data map[string]interface{}) bool {
+	// Handle different selection formats
+	switch s := sel.(type) {
+	case map[string]interface{}:
+		// Selection with field conditions
+		return d.matchSelection(s, data)
+	case []interface{}:
+		// OR logic: any item matches
+		for _, item := range s {
+			if d.matchSelectionField(selName, item, data) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// matchPattern matches a simple wildcard pattern
+func matchPattern(pattern, name string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(name, prefix)
+	}
+	if strings.HasPrefix(pattern, "*") {
+		suffix := strings.TrimPrefix(pattern, "*")
+		return strings.HasSuffix(name, suffix)
+	}
+	return strings.EqualFold(pattern, name)
+}
+
+// parseInt parses an integer from string
+func parseInt(s string) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
 }
 
 func (d *SigmaDetector) matchLogsource(logsource SigmaLogsource, record Record) bool {

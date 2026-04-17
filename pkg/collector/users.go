@@ -209,7 +209,6 @@ func (c *SudoHistoryCollector) Collect(ctx context.Context, opts *Options) (*Res
 		if err != nil {
 			continue
 		}
-		defer file.Close()
 
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
@@ -227,6 +226,7 @@ func (c *SudoHistoryCollector) Collect(ctx context.Context, opts *Options) (*Res
 				})
 			}
 		}
+		file.Close() // Close immediately after processing, not defer in loop
 	}
 
 	result := &Result{

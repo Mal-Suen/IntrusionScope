@@ -68,11 +68,17 @@ func (m *Manager) LoadIOCsFromDir(dir string) error {
 		return fmt.Errorf("failed to list IOC files: %w", err)
 	}
 
+	if len(files) == 0 {
+		return fmt.Errorf("no IOC files found in directory: %s", dir)
+	}
+
 	var allIOCs []IOCDefinition
+	loadErrors := []string{}
 
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		if err != nil {
+			loadErrors = append(loadErrors, fmt.Sprintf("%s: read error: %v", filepath.Base(file), err))
 			continue
 		}
 
@@ -83,12 +89,31 @@ func (m *Manager) LoadIOCsFromDir(dir string) error {
 				IOCs []IOCDefinition `json:"iocs"`
 			}
 			if err := json.Unmarshal(data, &wrapper); err != nil {
+				loadErrors = append(loadErrors, fmt.Sprintf("%s: parse error: %v", filepath.Base(file), err))
 				continue
 			}
 			iocs = wrapper.IOCs
 		}
 
-		allIOCs = append(allIOCs, iocs...)
+		// Validate IOCs
+		validIOCs := 0
+		for _, ioc := range iocs {
+			if ioc.Value == "" {
+				loadErrors = append(loadErrors, fmt.Sprintf("%s: IOC with empty value skipped", filepath.Base(file)))
+				continue
+			}
+			allIOCs = append(allIOCs, ioc)
+			validIOCs++
+		}
+	}
+
+	// Log warnings for files that had issues
+	if len(loadErrors) > 0 {
+		fmt.Printf("Warning: some IOC files had issues: %s\n", strings.Join(loadErrors, "; "))
+	}
+
+	if len(allIOCs) == 0 {
+		return fmt.Errorf("no valid IOCs loaded from directory: %s", dir)
 	}
 
 	return m.LoadIOCs(allIOCs)

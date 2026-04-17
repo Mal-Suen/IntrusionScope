@@ -60,8 +60,17 @@ func NewLibrary(cacheDir string) *Library {
 
 // Add adds a signature to the library
 func (l *Library) Add(sig *Signature) error {
+	if sig == nil {
+		return fmt.Errorf("signature cannot be nil")
+	}
 	if sig.ID == "" {
 		return fmt.Errorf("signature must have an ID")
+	}
+	if sig.Name == "" {
+		return fmt.Errorf("signature must have a name")
+	}
+	if sig.Type == "" {
+		return fmt.Errorf("signature must have a type")
 	}
 
 	l.mu.Lock()
@@ -279,8 +288,15 @@ func (l *Library) Load() error {
 
 	files, err := filepath.Glob(filepath.Join(l.cacheDir, "*.json"))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list signature files: %w", err)
 	}
+
+	if len(files) == 0 {
+		return nil // No files to load is not an error
+	}
+
+	loadErrors := []string{}
+	loadedCount := 0
 
 	for _, file := range files {
 		if strings.HasSuffix(file, "metadata.json") {
@@ -289,18 +305,31 @@ func (l *Library) Load() error {
 
 		data, err := os.ReadFile(file)
 		if err != nil {
+			loadErrors = append(loadErrors, fmt.Sprintf("%s: read error", filepath.Base(file)))
 			continue
 		}
 
 		var signatures []*Signature
 		if err := json.Unmarshal(data, &signatures); err != nil {
+			loadErrors = append(loadErrors, fmt.Sprintf("%s: parse error", filepath.Base(file)))
 			continue
 		}
 
 		for _, sig := range signatures {
+			if sig == nil || sig.ID == "" {
+				continue // Skip invalid signatures
+			}
 			sig.Enabled = true
-			l.Add(sig)
+			if err := l.Add(sig); err != nil {
+				loadErrors = append(loadErrors, fmt.Sprintf("%s: failed to add signature %s", filepath.Base(file), sig.ID))
+			} else {
+				loadedCount++
+			}
 		}
+	}
+
+	if loadedCount == 0 && len(files) > 0 {
+		return fmt.Errorf("no valid signatures loaded from %d files: %s", len(files), strings.Join(loadErrors, "; "))
 	}
 
 	return nil

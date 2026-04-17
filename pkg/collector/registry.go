@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -663,7 +664,7 @@ func (c *RegistryStartupCollector) Collect(ctx context.Context, opts *Options) (
 				Source:    "startup_folder",
 				Data: map[string]interface{}{
 					"location":  sf.name,
-					"path":      sf.path + "\\" + entry.Name(),
+					"path":      filepath.Join(sf.path, entry.Name()),
 					"name":      entry.Name(),
 					"size":      info.Size(),
 					"mod_time":  info.ModTime().Format("2006-01-02 15:04:05"),

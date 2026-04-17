@@ -117,6 +117,7 @@ func (c *LogSyslogCollector) readLogFile(path, source string, records *[]Record)
 	if strings.HasSuffix(path, ".gz") {
 		gzReader, err := gzip.NewReader(file)
 		if err != nil {
+			// file will be closed by defer
 			return
 		}
 		defer gzReader.Close()

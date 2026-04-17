@@ -4,7 +4,9 @@ package collector
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -207,16 +209,25 @@ func (c *ProcessListCollector) collectWindows(ctx context.Context, opts *Options
 		return c.collectWindowsTasklist(ctx, opts)
 	}
 
-	// Parse CSV output
-	lines := strings.Split(string(output), "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || i < 2 { // Skip header lines
+	// Parse CSV output using proper CSV reader to handle quoted fields
+	csvReader := csv.NewReader(strings.NewReader(string(output)))
+	lineNum := 0
+	for {
+		fields, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		lineNum++
+
+		// Skip header lines (first 2 lines)
+		if lineNum <= 2 {
 			continue
 		}
 
 		// CSV format: Node,CommandLine,CreationDate,ExecutablePath,Name,ParentProcessId,ProcessId
-		fields := strings.Split(line, ",")
 		if len(fields) < 7 {
 			continue
 		}

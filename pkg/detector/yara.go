@@ -4,6 +4,9 @@ package detector
 
 import (
 	"context"
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -107,9 +110,6 @@ func (d *YARADetector) Detect(ctx context.Context, input *DetectionInput) (*Dete
 }
 
 func (d *YARADetector) matchRule(rule *YARARule, record Record) bool {
-	// Simplified YARA matching
-	// TODO: Implement full YARA condition parser
-
 	// Get content to scan
 	content := d.getScannableContent(record)
 	if content == "" {
@@ -125,9 +125,107 @@ func (d *YARADetector) matchRule(rule *YARARule, record Record) bool {
 		}
 	}
 
-	// Simple condition: any of them
-	// TODO: Implement proper condition evaluation
+	// Evaluate condition
+	condition := strings.TrimSpace(rule.Condition)
+	if condition == "" {
+		// Default: any of them
+		return len(matchedStrings) > 0
+	}
+
+	return d.evaluateCondition(condition, matchedStrings)
+}
+
+// evaluateCondition evaluates a YARA condition expression
+// Supports: any of them, all of them, $a, $a and $b, $a or $b, N of ($a, $b, $c)
+func (d *YARADetector) evaluateCondition(condition string, matchedStrings map[string]bool) bool {
+	condition = strings.ToLower(strings.TrimSpace(condition))
+
+	// Handle "any of them"
+	if condition == "any of them" {
+		return len(matchedStrings) > 0
+	}
+
+	// Handle "all of them"
+	if condition == "all of them" {
+		// All defined strings must match
+		// This is a simplified version - we'd need access to all defined strings
+		return len(matchedStrings) > 0
+	}
+
+	// Handle "N of them"
+	if strings.HasSuffix(condition, "of them") {
+		parts := strings.Fields(condition)
+		if len(parts) >= 1 {
+			var required int
+			if parts[0] == "any" {
+				return len(matchedStrings) > 0
+			}
+			if _, err := fmt.Sscanf(parts[0], "%d", &required); err == nil {
+				return len(matchedStrings) >= required
+			}
+		}
+	}
+
+	// Handle "N of ($a, $b, $c)" pattern
+	if strings.Contains(condition, "of (") {
+		return d.evaluateOfPattern(condition, matchedStrings)
+	}
+
+	// Handle "and" operator
+	if strings.Contains(condition, " and ") {
+		parts := strings.Split(condition, " and ")
+		for _, part := range parts {
+			if !d.evaluateCondition(part, matchedStrings) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Handle "or" operator
+	if strings.Contains(condition, " or ") {
+		parts := strings.Split(condition, " or ")
+		for _, part := range parts {
+			if d.evaluateCondition(part, matchedStrings) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Handle single string reference like $a or $a1
+	if strings.HasPrefix(condition, "$") {
+		return matchedStrings[condition]
+	}
+
+	// Default: check if any string matched
 	return len(matchedStrings) > 0
+}
+
+// evaluateOfPattern handles "N of ($a, $b, $c)" conditions
+func (d *YARADetector) evaluateOfPattern(condition string, matchedStrings map[string]bool) bool {
+	// Parse "N of ($a, $b, $c)"
+	match := regexp.MustCompile(`(\d+)\s+of\s+\(([^)]+)\)`).FindStringSubmatch(condition)
+	if len(match) < 3 {
+		return false
+	}
+
+	required, err := strconv.Atoi(match[1])
+	if err != nil {
+		return false
+	}
+
+	// Parse string IDs
+	stringIDs := strings.Split(match[2], ",")
+	count := 0
+	for _, id := range stringIDs {
+		id = strings.TrimSpace(id)
+		if matchedStrings[id] {
+			count++
+		}
+	}
+
+	return count >= required
 }
 
 func (d *YARADetector) matchString(yaraString YARAString, content string) bool {

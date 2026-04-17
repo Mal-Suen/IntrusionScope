@@ -883,7 +883,32 @@ func (m *Manager) downloadAndExtract(url, dest string) error {
 			continue
 		}
 
+		// Security: Clean the path and check for path traversal
+		relPath = filepath.Clean(relPath)
+		if strings.HasPrefix(relPath, "..") || strings.HasPrefix(relPath, string(os.PathSeparator)) {
+			m.logger.Warn("Skipping potentially malicious path in zip", "path", f.Name)
+			rc.Close()
+			continue
+		}
+
 		dstPath := filepath.Join(dest, relPath)
+
+		// Security: Verify the final path is within the destination directory
+		absDest, err := filepath.Abs(dest)
+		if err != nil {
+			rc.Close()
+			continue
+		}
+		absDstPath, err := filepath.Abs(dstPath)
+		if err != nil {
+			rc.Close()
+			continue
+		}
+		if !strings.HasPrefix(absDstPath, absDest+string(os.PathSeparator)) {
+			m.logger.Warn("Skipping path traversal attempt in zip", "path", f.Name)
+			rc.Close()
+			continue
+		}
 
 		// Create parent directories
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {

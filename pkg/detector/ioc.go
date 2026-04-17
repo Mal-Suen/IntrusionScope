@@ -13,11 +13,13 @@ import (
 
 // IOCDetector detects IOCs in collected data
 type IOCDetector struct {
-	hashIndex    map[string]*Signature // MD5, SHA1, SHA256
-	ipIndex      *ipTrie
-	domainIndex  map[string]*Signature
-	urlIndex     map[string]*Signature
-	emailIndex   map[string]*Signature
+	hashIndex     map[string]*Signature // MD5, SHA1, SHA256
+	filenameIndex map[string]*Signature // File names
+	ipIndex       *ipTrie
+	domainIndex   map[string]*Signature
+	urlIndex      map[string]*Signature
+	emailIndex    map[string]*Signature
+	filePathIndex map[string]*Signature // File paths
 }
 
 type ipTrie struct {
@@ -40,11 +42,13 @@ func newIPTrie() *ipTrie {
 // NewIOCDetector creates a new IOC detector
 func NewIOCDetector() *IOCDetector {
 	return &IOCDetector{
-		hashIndex:   make(map[string]*Signature),
-		ipIndex:     newIPTrie(),
-		domainIndex: make(map[string]*Signature),
-		urlIndex:    make(map[string]*Signature),
-		emailIndex:  make(map[string]*Signature),
+		hashIndex:     make(map[string]*Signature),
+		filenameIndex: make(map[string]*Signature),
+		ipIndex:       newIPTrie(),
+		domainIndex:   make(map[string]*Signature),
+		urlIndex:      make(map[string]*Signature),
+		emailIndex:    make(map[string]*Signature),
+		filePathIndex: make(map[string]*Signature),
 	}
 }
 
@@ -65,27 +69,34 @@ func (d *IOCDetector) LoadSignatures(signatures []Signature) error {
 	for i := range signatures {
 		sig := &signatures[i]
 
-		switch sig.Metadata["type"] {
-		case "hash":
-			if hash, ok := sig.Metadata["value"].(string); ok {
-				d.hashIndex[strings.ToLower(hash)] = sig
-			}
+		// Get IOC type from metadata
+		iocType, ok := sig.Metadata["type"].(string)
+		if !ok {
+			continue
+		}
+		iocType = strings.ToLower(iocType)
+
+		// Get IOC value from metadata
+		value, ok := sig.Metadata["value"].(string)
+		if !ok {
+			continue
+		}
+
+		switch iocType {
+		case "hash", "md5", "sha1", "sha256":
+			d.hashIndex[strings.ToLower(value)] = sig
+		case "filename":
+			d.filenameIndex[strings.ToLower(value)] = sig
+		case "filepath", "path":
+			d.filePathIndex[strings.ToLower(value)] = sig
 		case "ip":
-			if ip, ok := sig.Metadata["value"].(string); ok {
-				d.addIP(ip, sig)
-			}
+			d.addIP(value, sig)
 		case "domain":
-			if domain, ok := sig.Metadata["value"].(string); ok {
-				d.domainIndex[strings.ToLower(domain)] = sig
-			}
+			d.domainIndex[strings.ToLower(value)] = sig
 		case "url":
-			if url, ok := sig.Metadata["value"].(string); ok {
-				d.urlIndex[strings.ToLower(url)] = sig
-			}
+			d.urlIndex[strings.ToLower(value)] = sig
 		case "email":
-			if email, ok := sig.Metadata["value"].(string); ok {
-				d.emailIndex[strings.ToLower(email)] = sig
-			}
+			d.emailIndex[strings.ToLower(value)] = sig
 		}
 	}
 	return nil
@@ -140,57 +151,72 @@ func (d *IOCDetector) Detect(ctx context.Context, input *DetectionInput) (*Detec
 func (d *IOCDetector) detectRecord(record Record) []Match {
 	var matches []Match
 
+	// Safety check for nil Data
+	if record.Data == nil {
+		return matches
+	}
+
 	// Check hashes
-	if hash, ok := record.Data["md5"].(string); ok {
+	if hash, ok := record.Data["md5"].(string); ok && hash != "" {
 		if sig, found := d.hashIndex[strings.ToLower(hash)]; found {
 			matches = append(matches, d.createMatch(sig, "md5", hash))
 		}
 	}
-	if hash, ok := record.Data["sha1"].(string); ok {
+	if hash, ok := record.Data["sha1"].(string); ok && hash != "" {
 		if sig, found := d.hashIndex[strings.ToLower(hash)]; found {
 			matches = append(matches, d.createMatch(sig, "sha1", hash))
 		}
 	}
-	if hash, ok := record.Data["sha256"].(string); ok {
+	if hash, ok := record.Data["sha256"].(string); ok && hash != "" {
 		if sig, found := d.hashIndex[strings.ToLower(hash)]; found {
 			matches = append(matches, d.createMatch(sig, "sha256", hash))
 		}
 	}
 
 	// Check IPs
-	if ip, ok := record.Data["remote_ip"].(string); ok {
+	if ip, ok := record.Data["remote_ip"].(string); ok && ip != "" {
 		if sig, found := d.domainIndex[ip]; found {
 			matches = append(matches, d.createMatch(sig, "ip", ip))
 		}
 	}
-	if ip, ok := record.Data["local_ip"].(string); ok {
+	if ip, ok := record.Data["local_ip"].(string); ok && ip != "" {
 		if sig, found := d.domainIndex[ip]; found {
 			matches = append(matches, d.createMatch(sig, "ip", ip))
 		}
 	}
 
 	// Check domains/URLs
-	if url, ok := record.Data["url"].(string); ok {
+	if url, ok := record.Data["url"].(string); ok && url != "" {
 		if sig, found := d.urlIndex[strings.ToLower(url)]; found {
 			matches = append(matches, d.createMatch(sig, "url", url))
 		}
 	}
-	if domain, ok := record.Data["domain"].(string); ok {
+	if domain, ok := record.Data["domain"].(string); ok && domain != "" {
 		if sig, found := d.domainIndex[strings.ToLower(domain)]; found {
 			matches = append(matches, d.createMatch(sig, "domain", domain))
 		}
 	}
 
-	// Check file paths
-	if path, ok := record.Data["path"].(string); ok {
+	// Check file paths - use filenameIndex and filePathIndex
+	if path, ok := record.Data["path"].(string); ok && path != "" {
+		// Check full path first
+		if sig, found := d.filePathIndex[strings.ToLower(path)]; found {
+			matches = append(matches, d.createMatch(sig, "filepath", path))
+		}
+		// Check filename
 		filename := filepath.Base(path)
-		if sig, found := d.hashIndex[strings.ToLower(filename)]; found {
+		if sig, found := d.filenameIndex[strings.ToLower(filename)]; found {
 			matches = append(matches, d.createMatch(sig, "filename", filename))
 		}
 	}
-	if exe, ok := record.Data["exe"].(string); ok {
+	if exe, ok := record.Data["exe"].(string); ok && exe != "" {
+		// Check full path first
+		if sig, found := d.filePathIndex[strings.ToLower(exe)]; found {
+			matches = append(matches, d.createMatch(sig, "filepath", exe))
+		}
+		// Check filename
 		filename := filepath.Base(exe)
-		if sig, found := d.hashIndex[strings.ToLower(filename)]; found {
+		if sig, found := d.filenameIndex[strings.ToLower(filename)]; found {
 			matches = append(matches, d.createMatch(sig, "filename", filename))
 		}
 	}

@@ -5,6 +5,8 @@ package detector
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -274,10 +276,75 @@ func (d *SigmaDetector) evaluateOfPattern(condition string, selections map[strin
 }
 
 // evaluateCount handles count() aggregation conditions
+// Supports: count(selection) > N, count(selection) < N, count(selection) >= N, count(selection) <= N, count(selection) == N
 func (d *SigmaDetector) evaluateCount(condition string, selections map[string]interface{}, data map[string]interface{}) bool {
-	// Parse count(selection) > N, count(selection) < N, etc.
-	// This is a simplified implementation
-	return false // TODO: Implement count aggregation
+	// Parse count(selection) operator N
+	// Regex pattern: count\s*\(\s*(\w+)\s*\)\s*(>|<|>=|<=|==)\s*(\d+)
+	re := regexp.MustCompile(`count\s*\(\s*(\w+)\s*\)\s*(>|<|>=|<=|==)\s*(\d+)`)
+	matches := re.FindStringSubmatch(strings.ToLower(condition))
+	
+	if len(matches) < 4 {
+		return false
+	}
+	
+	selectionName := matches[1]
+	operator := matches[2]
+	threshold, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return false
+	}
+	
+	// Get the selection to count
+	sel, ok := selections[selectionName]
+	if !ok {
+		// Try case-insensitive lookup
+		for k, v := range selections {
+			if strings.EqualFold(k, selectionName) {
+				sel = v
+				ok = true
+				break
+			}
+		}
+	}
+	
+	if !ok {
+		return false
+	}
+	
+	// Count occurrences
+	count := 0
+	
+	// Handle different selection types
+	switch s := sel.(type) {
+	case map[string]interface{}:
+		// Single selection - check if it matches
+		if d.matchSelection(s, data) {
+			count = 1
+		}
+	case []interface{}:
+		// Array of selections - count how many match
+		for _, item := range s {
+			if d.matchSelectionField(selectionName, item, data) {
+				count++
+			}
+		}
+	}
+	
+	// Apply the comparison operator
+	switch operator {
+	case ">":
+		return count > threshold
+	case "<":
+		return count < threshold
+	case ">=":
+		return count >= threshold
+	case "<=":
+		return count <= threshold
+	case "==":
+		return count == threshold
+	default:
+		return false
+	}
 }
 
 // matchSelectionField matches a single selection field against data

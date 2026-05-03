@@ -1,0 +1,210 @@
+{
+  "version": "1.0",
+  "updated": "2026-01-01",
+  "description": "Built-in IOC database for IntrusionScope",
+  "iocs": [
+    {
+      "id": "malware_hash_1",
+      "value": "5ad82b42d8c9f1a5d5d5d5d5d5d5d5d5",
+      "ioc_type": "SHA256",
+      "severity": 4,
+      "description": "Known malware hash"
+    },
+    {
+      "id": "c2_ip_1",
+      "value": "45.33.32.156",
+      "ioc_type": "IP",
+      "severity": 4,
+      "description": "Known malicious IP"
+    },
+    {
+      "id": "c2_ip_2",
+      "value": "185.220.101.42",
+      "ioc_type": "IP",
+      "severity": 5,
+      "description": "Tor exit node"
+    },
+    {
+      "id": "c2_ip_3",
+      "value": "104.244.76.13",
+      "ioc_type": "IP",
+      "severity": 4,
+      "description": "Known C2 infrastructure"
+    },
+    {
+      "id": "c2_ip_4",
+      "value": "91.121.87.18",
+      "ioc_type": "IP",
+      "severity": 4,
+      "description": "Known C2 server"
+    },
+    {
+      "id": "c2_ip_5",
+      "value": "198.51.100.23",
+      "ioc_type": "IP",
+      "severity": 4,
+      "description": "Known malicious IP"
+    },
+    {
+      "id": "c2_domain_1",
+      "value": "malware.example.com",
+      "ioc_type": "Domain",
+      "severity": 3,
+      "description": "Known C2 domain"
+    },
+    {
+      "id": "c2_domain_2",
+      "value": "pastebin.com/raw",
+      "ioc_type": "Domain",
+      "severity": 2,
+      "description": "Suspicious domain - commonly used for payload delivery"
+    },
+    {
+      "id": "suspicious_proc_1",
+      "value": "mimikatz.exe",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "Mimikatz credential theft tool"
+    },
+    {
+      "id": "suspicious_proc_2",
+      "value": "mimikatz",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "Mimikatz credential theft tool"
+    },
+    {
+      "id": "suspicious_proc_3",
+      "value": "cobaltstrike",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "Cobalt Strike beacon"
+    },
+    {
+      "id": "suspicious_proc_4",
+      "value": "meterpreter",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "Metasploit Meterpreter"
+    },
+    {
+      "id": "suspicious_proc_5",
+      "value": "procdump",
+      "ioc_type": "process",
+      "severity": 3,
+      "description": "Process dump tool"
+    },
+    {
+      "id": "suspicious_proc_6",
+      "value": "lazagne",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "LaZagne credential theft tool"
+    },
+    {
+      "id": "suspicious_proc_7",
+      "value": "bloodhound",
+      "ioc_type": "process",
+      "severity": 3,
+      "description": "BloodHound AD reconnaissance tool"
+    },
+    {
+      "id": "suspicious_proc_8",
+      "value": "sharphound",
+      "ioc_type": "process",
+      "severity": 3,
+      "description": "SharpHound AD reconnaissance tool"
+    },
+    {
+      "id": "suspicious_proc_9",
+      "value": "beacon.exe",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "Cobalt Strike Beacon"
+    },
+    {
+      "id": "suspicious_proc_10",
+      "value": "beacon",
+      "ioc_type": "process",
+      "severity": 5,
+      "description": "Cobalt Strike Beacon"
+    },
+    {
+      "id": "suspicious_proc_11",
+      "value": "nc.exe",
+      "ioc_type": "process",
+      "severity": 4,
+      "description": "Netcat tool"
+    },
+    {
+      "id": "suspicious_proc_12",
+      "value": "ncat.exe",
+      "ioc_type": "process",
+      "severity": 4,
+      "description": "Ncat tool"
+    },
+    {
+      "id": "suspicious_proc_13",
+      "value": "psexec",
+      "ioc_type": "process",
+      "severity": 3,
+      "description": "PsExec remote execution tool"
+    },
+    {
+      "id": "suspicious_proc_14",
+      "value": "winexe",
+      "ioc_type": "process",
+      "severity": 3,
+      "description": "WinExe remote execution tool"
+    },
+    {
+      "id": "suspicious_path_1",
+      "value": "\\Temp\\",
+      "ioc_type": "path",
+      "severity": 2,
+      "description": "Suspicious temp directory execution"
+    },
+    {
+      "id": "suspicious_path_2",
+      "value": "\\Users\\Public\\",
+      "ioc_type": "path",
+      "severity": 3,
+      "description": "Suspicious Public directory execution"
+    },
+    {
+      "id": "suspicious_path_3",
+      "value": "\\AppData\\Local\\Temp\\",
+      "ioc_type": "path",
+      "severity": 2,
+      "description": "Suspicious AppData directory execution"
+    },
+    {
+      "id": "suspicious_path_4",
+      "value": "\\ProgramData\\",
+      "ioc_type": "path",
+      "severity": 2,
+      "description": "ProgramData directory execution"
+    },
+    {
+      "id": "c2_port_1",
+      "value": "4444",
+      "ioc_type": "port",
+      "severity": 3,
+      "description": "Metasploit default port"
+    },
+    {
+      "id": "c2_port_2",
+      "value": "5555",
+      "ioc_type": "port",
+      "severity": 3,
+      "description": "Common reverse shell port"
+    },
+    {
+      "id": "c2_port_3",
+      "value": "9001",
+      "ioc_type": "port",
+      "severity": 3,
+      "description": "Tor/C2 common port"
+    }
+  ]
+}

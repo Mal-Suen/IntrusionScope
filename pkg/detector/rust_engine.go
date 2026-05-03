@@ -191,10 +191,30 @@ func (e *RustEngine) DetectString(content string) (*EngineResult, error) {
 }
 
 // LoadIOCsFromFile loads IOCs from a JSON file
-func (e *RustEngine) LoadIOCsFromFile(filepath string) error {
-	// This would read the file and call LoadIOCsFromJSON
-	// Implementation depends on file format
-	return fmt.Errorf("not implemented")
+func (e *RustEngine) LoadIOCsFromFile(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read IOC file: %w", err)
+	}
+
+	var iocFile struct {
+		IOCs []IOCDefinition `json:"iocs"`
+	}
+
+	if err := json.Unmarshal(data, &iocFile); err != nil {
+		// Try as direct array
+		var iocs []IOCDefinition
+		if err := json.Unmarshal(data, &iocs); err != nil {
+			return fmt.Errorf("failed to parse IOC file: %w", err)
+		}
+		iocFile.IOCs = iocs
+	}
+
+	if len(iocFile.IOCs) == 0 {
+		return fmt.Errorf("no IOCs found in file: %s", filePath)
+	}
+
+	return e.LoadIOCs(iocFile.IOCs)
 }
 
 // AddPatterns adds multiple patterns at once

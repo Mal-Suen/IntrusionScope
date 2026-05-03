@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -338,13 +339,13 @@ func (e *Executor) selectColumns(records []map[string]interface{}, columns []str
 	return result
 }
 
-// applyOrderBy sorts records by the specified column
+// applyOrderBy sorts records by the specified column using efficient sort.Slice
 func (e *Executor) applyOrderBy(records []map[string]interface{}, orderBy, orderDir string) []map[string]interface{} {
-	if orderBy == "" {
+	if orderBy == "" || len(records) == 0 {
 		return records
 	}
 
-	// Simple bubble sort (can be optimized)
+	// Create a copy to avoid modifying the original
 	result := make([]map[string]interface{}, len(records))
 	copy(result, records)
 
@@ -363,24 +364,18 @@ func (e *Executor) applyOrderBy(records []map[string]interface{}, orderBy, order
 		return ""
 	}
 
-	for i := 0; i < len(result)-1; i++ {
-		for j := 0; j < len(result)-i-1; j++ {
-			aVal := getValue(result[j], orderBy)
-			bVal := getValue(result[j+1], orderBy)
-
-			cmp := e.compareNumbers(aVal, bVal)
-			shouldSwap := false
-			if descending {
-				shouldSwap = cmp < 0
-			} else {
-				shouldSwap = cmp > 0
-			}
-
-			if shouldSwap {
-				result[j], result[j+1] = result[j+1], result[j]
-			}
+	// Use sort.Slice for O(n log n) performance instead of O(n^2) bubble sort
+	sort.Slice(result, func(i, j int) bool {
+		aVal := getValue(result[i], orderBy)
+		bVal := getValue(result[j], orderBy)
+		
+		cmp := e.compareNumbers(aVal, bVal)
+		
+		if descending {
+			return cmp > 0
 		}
-	}
+		return cmp < 0
+	})
 
 	return result
 }

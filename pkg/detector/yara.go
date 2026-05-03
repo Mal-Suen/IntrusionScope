@@ -250,18 +250,64 @@ func (d *YARADetector) matchString(yaraString YARAString, content string) bool {
 		return strings.Contains(content, yaraString.Value)
 
 	case "hex":
-		// Simplified hex matching
+		// Hex matching: convert hex pattern to binary and search
 		hexValue := strings.ReplaceAll(yaraString.Value, " ", "")
-		hexValue = strings.ReplaceAll(hexValue, "?", "")
+		hexValue = strings.ReplaceAll(hexValue, "\t", "")
+		hexValue = strings.ReplaceAll(hexValue, "\n", "")
+		
+		// Handle wildcards (?) - convert to regex pattern
+		if strings.Contains(hexValue, "?") {
+			// Convert hex with wildcards to regex
+			regexPattern := ""
+			for i := 0; i < len(hexValue); i += 2 {
+				if i+1 >= len(hexValue) {
+					break
+				}
+				hexPair := hexValue[i : i+1]
+				if hexPair == "??" || hexPair == "?" {
+					regexPattern += "."
+				} else if strings.Contains(hexPair, "?") {
+					// Partial wildcard like "A?"
+					regexPattern += "[" + string(hexPair[0]) + "0-9a-fA-F]"
+				} else {
+					// Convert hex pair to character
+					regexPattern += regexp.QuoteMeta(string(hexPair))
+				}
+			}
+			matched, _ := regexp.MatchString("(?i)"+regexPattern, content)
+			return matched
+		}
+		
+		// Simple hex matching without wildcards
 		return strings.Contains(content, hexValue)
 
 	case "regex":
-		// Simplified regex matching (exact substring for now)
-		// TODO: Implement proper regex matching
+		// Proper regex matching
 		pattern := yaraString.Value
-		pattern = strings.Trim(pattern, "/")
-		pattern = strings.ReplaceAll(pattern, ".*", "")
-		return strings.Contains(content, pattern)
+		
+		// Handle YARA regex syntax variations
+		// YARA uses /regex/ syntax, remove delimiters if present
+		if strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/") {
+			pattern = strings.TrimSuffix(strings.TrimPrefix(pattern, "/"), "/")
+		} else if strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/i") {
+			// Case insensitive flag
+			pattern = strings.TrimSuffix(strings.TrimPrefix(pattern, "/"), "/i")
+			matched, err := regexp.MatchString("(?i)"+pattern, content)
+			if err != nil {
+				// Invalid regex, fall back to substring match
+				return strings.Contains(content, pattern)
+			}
+			return matched
+		}
+		
+		// Compile and match the regex
+		matched, err := regexp.MatchString(pattern, content)
+		if err != nil {
+			// Invalid regex pattern, fall back to substring match
+			// This handles edge cases where YARA regex syntax differs from Go regex
+			return strings.Contains(content, pattern)
+		}
+		return matched
 
 	default:
 		return false

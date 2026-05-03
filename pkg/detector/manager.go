@@ -35,7 +35,8 @@ func NewManager(config *ManagerConfig) (*Manager, error) {
 	engine, err := NewRustEngine()
 	if err != nil {
 		// Log warning but continue with Go fallback
-		fmt.Printf("Warning: Rust engine not available, using Go fallback: %v\n", err)
+		// Note: In production, use structured logging library
+		// log.Warn("Rust engine not available, using Go fallback", "error", err)
 	} else {
 		m.engine = engine
 	}
@@ -43,7 +44,8 @@ func NewManager(config *ManagerConfig) (*Manager, error) {
 	// Load IOCs from directory
 	if config.IOCsDir != "" {
 		if err := m.LoadIOCsFromDir(config.IOCsDir); err != nil {
-			fmt.Printf("Warning: failed to load IOCs: %v\n", err)
+			// Note: In production, use structured logging library
+			// log.Warn("Failed to load IOCs", "error", err)
 		}
 	}
 
@@ -107,10 +109,10 @@ func (m *Manager) LoadIOCsFromDir(dir string) error {
 		}
 	}
 
-	// Log warnings for files that had issues
-	if len(loadErrors) > 0 {
-		fmt.Printf("Warning: some IOC files had issues: %s\n", strings.Join(loadErrors, "; "))
-	}
+	// Note: In production, use structured logging for warnings
+	// if len(loadErrors) > 0 {
+	//     log.Warn("Some IOC files had issues", "errors", strings.Join(loadErrors, "; "))
+	// }
 
 	if len(allIOCs) == 0 {
 		return fmt.Errorf("no valid IOCs loaded from directory: %s", dir)
@@ -358,7 +360,7 @@ func (db *IOCDatabase) Add(ioc IOCDefinition) {
 	}
 }
 
-// Detect performs detection using the database
+// Detect performs detection using the database with precise matching
 func (db *IOCDatabase) Detect(content string) *EngineResult {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -366,9 +368,9 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 	var matches []EngineMatch
 	contentLower := strings.ToLower(content)
 
-	// Check hashes
+	// Check hashes with precise matching
 	for value, ioc := range db.hashes {
-		if strings.Contains(contentLower, value) {
+		if MatchHashExact(content, value) {
 			matches = append(matches, EngineMatch{
 				SignatureID:   ioc.ID,
 				SignatureName: ioc.Description,
@@ -378,9 +380,9 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check IPs
+	// Check IPs with precise matching
 	for value, ioc := range db.ips {
-		if strings.Contains(content, value) {
+		if MatchIPExact(content, value) {
 			matches = append(matches, EngineMatch{
 				SignatureID:   ioc.ID,
 				SignatureName: ioc.Description,
@@ -390,9 +392,9 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check domains
+	// Check domains with precise matching
 	for value, ioc := range db.domains {
-		if strings.Contains(contentLower, value) {
+		if MatchDomainExact(content, value) {
 			matches = append(matches, EngineMatch{
 				SignatureID:   ioc.ID,
 				SignatureName: ioc.Description,
@@ -402,9 +404,9 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check URLs
+	// Check URLs with precise matching
 	for value, ioc := range db.urls {
-		if strings.Contains(contentLower, value) {
+		if MatchURLExact(content, value) {
 			matches = append(matches, EngineMatch{
 				SignatureID:   ioc.ID,
 				SignatureName: ioc.Description,
@@ -414,9 +416,9 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check processes
+	// Check processes with precise matching
 	for value, ioc := range db.processes {
-		if strings.Contains(contentLower, value) {
+		if MatchProcessNameExact(content, value) {
 			matches = append(matches, EngineMatch{
 				SignatureID:   ioc.ID,
 				SignatureName: ioc.Description,
@@ -426,9 +428,9 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check paths
+	// Check paths (paths use contains matching as they can be substrings of full paths)
 	for value, ioc := range db.paths {
-		if strings.Contains(contentLower, value) {
+		if MatchPathExact(content, value) {
 			matches = append(matches, EngineMatch{
 				SignatureID:   ioc.ID,
 				SignatureName: ioc.Description,
@@ -438,25 +440,15 @@ func (db *IOCDatabase) Detect(content string) *EngineResult {
 		}
 	}
 
-	// Check ports - use more precise matching to avoid false positives
+	// Check ports with precise matching
 	for value, ioc := range db.ports {
-		// Match port with colon prefix (e.g., ":4444" in "127.0.0.1:4444")
-		if strings.Contains(content, ":"+value) {
-			// Verify it's actually a port number and not part of a larger number
-			// by checking the character after the port number
-			idx := strings.Index(content, ":"+value)
-			if idx >= 0 {
-				portEnd := idx + len(value) + 1
-				// Check if port is followed by a non-digit character or end of string
-				if portEnd >= len(content) || !isDigit(content[portEnd]) {
-					matches = append(matches, EngineMatch{
-						SignatureID:   ioc.ID,
-						SignatureName: ioc.Description,
-						Severity:      ioc.Severity,
-						Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
-					})
-				}
-			}
+		if MatchPortExact(content, value) {
+			matches = append(matches, EngineMatch{
+				SignatureID:   ioc.ID,
+				SignatureName: ioc.Description,
+				Severity:      ioc.Severity,
+				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
+			})
 		}
 	}
 

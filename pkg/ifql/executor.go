@@ -243,9 +243,14 @@ func (e *Executor) evaluateLike(record map[string]interface{}, c *LikeExpr) bool
 	valueStr := strings.ToLower(fmt.Sprintf("%v", value))
 	pattern := strings.ToLower(c.Pattern)
 
-	// Convert SQL LIKE pattern to regex
-	regexPattern := "^" + strings.ReplaceAll(pattern, "%", ".*") + "$"
-	regexPattern = strings.ReplaceAll(regexPattern, "_", ".")
+	// Convert SQL LIKE pattern to regex, escaping regex special characters first
+	// Step 1: Escape all regex special characters in the pattern
+	escaped := regexp.QuoteMeta(pattern)
+	// Step 2: Convert LIKE wildcards (which were escaped by QuoteMeta) back to regex
+	// After QuoteMeta, % becomes \% and _ becomes \_
+	escaped = strings.ReplaceAll(escaped, `\%`, ".*") // % matches any sequence
+	escaped = strings.ReplaceAll(escaped, `\_`, ".")  // _ matches any single char
+	regexPattern := "^" + escaped + "$"
 
 	matched, err := regexp.MatchString(regexPattern, valueStr)
 	if err != nil {
@@ -427,11 +432,12 @@ func (e *Executor) formatCSV(results []map[string]interface{}) (string, error) {
 
 	var lines []string
 
-	// Get headers from first record
+	// Get headers from first record and sort for deterministic order
 	var headers []string
 	for k := range results[0] {
 		headers = append(headers, k)
 	}
+	sort.Strings(headers)
 	lines = append(lines, strings.Join(headers, ","))
 
 	// Add data rows
@@ -457,11 +463,12 @@ func (e *Executor) formatTable(results []map[string]interface{}) (string, error)
 		return "No results found.", nil
 	}
 
-	// Get headers
+	// Get headers and sort for deterministic order
 	var headers []string
 	for k := range results[0] {
 		headers = append(headers, k)
 	}
+	sort.Strings(headers)
 
 	// Calculate column widths
 	widths := make(map[string]int)

@@ -4,6 +4,7 @@ package detector
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -61,7 +62,7 @@ func (d *YARADetector) LoadRules(rules []YARARule) error {
 	return nil
 }
 
-func (d *YARADetector) Detect(ctx context.Context, input *DetectionInput) (*DetectionResult, error) {
+func (d *YARADetector) Detect(input *DetectionInput) (*DetectionResult, error) {
 	start := time.Now()
 	result := &DetectionResult{
 		Detector:  d.Name(),
@@ -109,7 +110,7 @@ func (d *YARADetector) Detect(ctx context.Context, input *DetectionInput) (*Dete
 	return result, nil
 }
 
-func (d *YARADetector) matchRule(rule *YARARule, record Record) bool {
+func (d *YARADetector) matchRule(rule *YARARule, record DetectionRecord) bool {
 	// Get content to scan
 	content := d.getScannableContent(record)
 	if content == "" {
@@ -254,8 +255,8 @@ func (d *YARADetector) matchString(yaraString YARAString, content string) bool {
 		hexValue := strings.ReplaceAll(yaraString.Value, " ", "")
 		hexValue = strings.ReplaceAll(hexValue, "\t", "")
 		hexValue = strings.ReplaceAll(hexValue, "\n", "")
-		
-		// Handle wildcards (?) - convert to regex pattern
+
+		// Handle wildcards (??) - convert to regex pattern
 		if strings.Contains(hexValue, "?") {
 			// Convert hex with wildcards to regex
 			regexPattern := ""
@@ -263,28 +264,43 @@ func (d *YARADetector) matchString(yaraString YARAString, content string) bool {
 				if i+1 >= len(hexValue) {
 					break
 				}
-				hexPair := hexValue[i : i+1]
-				if hexPair == "??" || hexPair == "?" {
+				// Take 2 characters at a time (proper hex pair)
+				hexPair := hexValue[i : i+2]
+				if hexPair == "??" {
+					// Full wildcard - match any byte
 					regexPattern += "."
-				} else if strings.Contains(hexPair, "?") {
-					// Partial wildcard like "A?"
-					regexPattern += "[" + string(hexPair[0]) + "0-9a-fA-F]"
+				} else if hexPair[0] == '?' {
+					// First nibble wildcard: ?A -> [0-9a-f]A
+					regexPattern += "[0-9a-fA-F]" + regexp.QuoteMeta(string(hexPair[1]))
+				} else if hexPair[1] == '?' {
+					// Second nibble wildcard: A? -> A[0-9a-f]
+					regexPattern += regexp.QuoteMeta(string(hexPair[0])) + "[0-9a-fA-F]"
 				} else {
-					// Convert hex pair to character
-					regexPattern += regexp.QuoteMeta(string(hexPair))
+					// No wildcard - convert hex pair to escaped byte character
+					if val, err := strconv.ParseInt(hexPair, 16, 32); err == nil {
+						regexPattern += regexp.QuoteMeta(string(byte(val)))
+					} else {
+						// Invalid hex, use as literal
+						regexPattern += regexp.QuoteMeta(hexPair)
+					}
 				}
 			}
-			matched, _ := regexp.MatchString("(?i)"+regexPattern, content)
+			matched, _ := regexp.MatchString("(?s)"+regexPattern, content)
 			return matched
 		}
-		
-		// Simple hex matching without wildcards
-		return strings.Contains(content, hexValue)
+
+		// Simple hex matching without wildcards: decode to binary and search
+		decoded, err := hex.DecodeString(hexValue)
+		if err != nil {
+			// Invalid hex string, fall back to string contains
+			return strings.Contains(content, hexValue)
+		}
+		return strings.Contains(content, string(decoded))
 
 	case "regex":
 		// Proper regex matching
 		pattern := yaraString.Value
-		
+
 		// Handle YARA regex syntax variations
 		// YARA uses /regex/ syntax, remove delimiters if present
 		if strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/") {
@@ -299,7 +315,7 @@ func (d *YARADetector) matchString(yaraString YARAString, content string) bool {
 			}
 			return matched
 		}
-		
+
 		// Compile and match the regex
 		matched, err := regexp.MatchString(pattern, content)
 		if err != nil {
@@ -314,7 +330,7 @@ func (d *YARADetector) matchString(yaraString YARAString, content string) bool {
 	}
 }
 
-func (d *YARADetector) getScannableContent(record Record) string {
+func (d *YARADetector) getScannableContent(record DetectionRecord) string {
 	var content strings.Builder
 
 	// Concatenate all string values from the record

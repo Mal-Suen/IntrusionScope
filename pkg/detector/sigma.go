@@ -4,6 +4,7 @@ package detector
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -39,10 +40,11 @@ type SigmaLogsource struct {
 }
 
 // SigmaDetection defines the detection logic
+// Supports multiple named selections (selection1, selection2, filter, etc.)
 type SigmaDetection struct {
-	Selection   map[string]interface{} `json:"selection"`
-	Condition   string                 `json:"condition"`
-	Timeframe   string                 `json:"timeframe"`
+	Selections  map[string]interface{} `json:"selections"`  // Named selections (selection, selection1, filter, etc.)
+	Condition   string                 `json:"condition"`   // Condition expression
+	Timeframe   string                 `json:"timeframe"`   // Time window for aggregation
 }
 
 // conditionParser parses and evaluates Sigma condition expressions
@@ -78,7 +80,7 @@ func (d *SigmaDetector) LoadRules(rules []SigmaRule) error {
 	return nil
 }
 
-func (d *SigmaDetector) Detect(ctx context.Context, input *DetectionInput) (*DetectionResult, error) {
+func (d *SigmaDetector) Detect(input *DetectionInput) (*DetectionResult, error) {
 	start := time.Now()
 	result := &DetectionResult{
 		Detector:  d.Name(),
@@ -126,14 +128,14 @@ func (d *SigmaDetector) Detect(ctx context.Context, input *DetectionInput) (*Det
 	return result, nil
 }
 
-func (d *SigmaDetector) matchRule(rule *SigmaRule, record Record) bool {
+func (d *SigmaDetector) matchRule(rule *SigmaRule, record DetectionRecord) bool {
 	// Check if record type matches logsource
 	if !d.matchLogsource(rule.Logsource, record) {
 		return false
 	}
 
-	selection := rule.Detection.Selection
-	if selection == nil {
+	selections := rule.Detection.Selections
+	if selections == nil || len(selections) == 0 {
 		return false
 	}
 
@@ -141,11 +143,18 @@ func (d *SigmaDetector) matchRule(rule *SigmaRule, record Record) bool {
 	condition := rule.Detection.Condition
 	if condition == "" {
 		// No condition specified, use simple AND logic on all selections
-		return d.matchSelection(selection, record.Data)
+		for _, sel := range selections {
+			if selMap, ok := sel.(map[string]interface{}); ok {
+				if !d.matchSelection(selMap, record.Data) {
+					return false
+				}
+			}
+		}
+		return true
 	}
 
 	// Evaluate condition expression
-	return d.evaluateCondition(condition, selection, record.Data)
+	return d.evaluateCondition(condition, selections, record.Data)
 }
 
 // evaluateCondition parses and evaluates a Sigma condition expression
@@ -390,7 +399,7 @@ func parseInt(s string) (int, error) {
 	return result, err
 }
 
-func (d *SigmaDetector) matchLogsource(logsource SigmaLogsource, record Record) bool {
+func (d *SigmaDetector) matchLogsource(logsource SigmaLogsource, record DetectionRecord) bool {
 	// Check if record matches the logsource
 	recordType := record.Type
 
@@ -450,20 +459,45 @@ func (d *SigmaDetector) matchField(key string, value interface{}, data map[strin
 		return false
 
 	case map[string]interface{}:
-		// Modifiers (contains, startswith, endswith, etc.)
+		// Modifiers (contains, startswith, endswith, contains|all, re, base64, etc.)
 		for modifier, modValue := range v {
-			switch modifier {
+			// Handle compound modifiers like "contains|all"
+			modParts := strings.Split(modifier, "|")
+			baseModifier := modParts[0]
+			hasAllModifier := len(modParts) > 1 && modParts[1] == "all"
+
+			switch baseModifier {
 			case "contains":
 				strData, ok := dataValue.(string)
 				if !ok {
 					return false
 				}
-				strMod, ok := modValue.(string)
-				if !ok {
-					return false
-				}
-				if !strings.Contains(strings.ToLower(strData), strings.ToLower(strMod)) {
-					return false
+
+				if hasAllModifier {
+					// contains|all: all items in the list must be present
+					switch mv := modValue.(type) {
+					case []interface{}:
+						for _, item := range mv {
+							strItem, ok := item.(string)
+							if !ok {
+								return false
+							}
+							if !strings.Contains(strings.ToLower(strData), strings.ToLower(strItem)) {
+								return false
+							}
+						}
+						return true
+					case string:
+						return strings.Contains(strings.ToLower(strData), strings.ToLower(mv))
+					}
+				} else {
+					strMod, ok := modValue.(string)
+					if !ok {
+						return false
+					}
+					if !strings.Contains(strings.ToLower(strData), strings.ToLower(strMod)) {
+						return false
+					}
 				}
 
 			case "startswith":
@@ -489,6 +523,68 @@ func (d *SigmaDetector) matchField(key string, value interface{}, data map[strin
 					return false
 				}
 				if !strings.HasSuffix(strings.ToLower(strData), strings.ToLower(strMod)) {
+					return false
+				}
+
+			case "re":
+				// Regular expression modifier
+				strData, ok := dataValue.(string)
+				if !ok {
+					return false
+				}
+				strMod, ok := modValue.(string)
+				if !ok {
+					return false
+				}
+				matched, err := regexp.MatchString(strMod, strData)
+				if err != nil {
+					// Invalid regex, fall back to contains
+					return strings.Contains(strData, strMod)
+				}
+				if !matched {
+					return false
+				}
+
+			case "base64":
+				// base64 modifier: encode the value and search
+				strData, ok := dataValue.(string)
+				if !ok {
+					return false
+				}
+				strMod, ok := modValue.(string)
+				if !ok {
+					return false
+				}
+				encoded := base64.StdEncoding.EncodeToString([]byte(strMod))
+				if !strings.Contains(strData, encoded) {
+					return false
+				}
+
+			case "base64offset":
+				// base64offset modifier: check all possible base64 offsets
+				strData, ok := dataValue.(string)
+				if !ok {
+					return false
+				}
+				strMod, ok := modValue.(string)
+				if !ok {
+					return false
+				}
+				// Check 3 possible offsets for base64 encoding
+				found := false
+				for offset := 0; offset < 3; offset++ {
+					padded := strings.Repeat("=", offset) + strMod
+					encoded := base64.StdEncoding.EncodeToString([]byte(padded))
+					// Remove padding characters from the beginning
+					if offset > 0 {
+						encoded = encoded[offset:]
+					}
+					if strings.Contains(strData, encoded) {
+						found = true
+						break
+					}
+				}
+				if !found {
 					return false
 				}
 			}

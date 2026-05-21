@@ -7,12 +7,14 @@ package detector
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
 // RustEngine is a pure Go fallback when CGO is not available
+// It uses IOCDatabase for precise matching to avoid false positives
 type RustEngine struct {
-	iocs     map[string][]IOCDefinition
+	iocDB    *IOCDatabase
 	patterns map[string]int
 	built    bool
 }
@@ -20,12 +22,7 @@ type RustEngine struct {
 // NewRustEngine creates a new detection engine (Go fallback)
 func NewRustEngine() (*RustEngine, error) {
 	return &RustEngine{
-		iocs: map[string][]IOCDefinition{
-			"hash":   {},
-			"ip":     {},
-			"domain": {},
-			"url":    {},
-		},
+		iocDB:    NewIOCDatabase(),
 		patterns: make(map[string]int),
 		built:    false,
 	}, nil
@@ -39,17 +36,7 @@ func (e *RustEngine) Close() {
 // LoadIOCs loads IOC definitions into the engine
 func (e *RustEngine) LoadIOCs(iocs []IOCDefinition) error {
 	for _, ioc := range iocs {
-		iocType := strings.ToLower(ioc.IOCType)
-		switch iocType {
-		case "md5", "sha1", "sha256", "hash":
-			e.iocs["hash"] = append(e.iocs["hash"], ioc)
-		case "ip", "ipv4", "ipv6":
-			e.iocs["ip"] = append(e.iocs["ip"], ioc)
-		case "domain":
-			e.iocs["domain"] = append(e.iocs["domain"], ioc)
-		case "url":
-			e.iocs["url"] = append(e.iocs["url"], ioc)
-		}
+		e.iocDB.Add(ioc)
 	}
 	return nil
 }
@@ -75,67 +62,19 @@ func (e *RustEngine) Build() error {
 	return nil
 }
 
-// Detect performs detection on the given content
+// Detect performs detection on the given content using precise matching
 func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 	if !e.built {
 		return nil, fmt.Errorf("engine not built, call Build() first")
 	}
 
-	var matches []EngineMatch
-	contentLower := strings.ToLower(content)
+	// Use IOCDatabase for precise matching (avoids false positives)
+	result := e.iocDB.Detect(content)
 
-	// Check hash IOCs
-	for _, ioc := range e.iocs["hash"] {
-		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
-			matches = append(matches, EngineMatch{
-				SignatureID:   ioc.ID,
-				SignatureName: ioc.Description,
-				Severity:      ioc.Severity,
-				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
-			})
-		}
-	}
-
-	// Check IP IOCs
-	for _, ioc := range e.iocs["ip"] {
-		if strings.Contains(content, ioc.Value) {
-			matches = append(matches, EngineMatch{
-				SignatureID:   ioc.ID,
-				SignatureName: ioc.Description,
-				Severity:      ioc.Severity,
-				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
-			})
-		}
-	}
-
-	// Check domain IOCs
-	for _, ioc := range e.iocs["domain"] {
-		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
-			matches = append(matches, EngineMatch{
-				SignatureID:   ioc.ID,
-				SignatureName: ioc.Description,
-				Severity:      ioc.Severity,
-				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
-			})
-		}
-	}
-
-	// Check URL IOCs
-	for _, ioc := range e.iocs["url"] {
-		if strings.Contains(contentLower, strings.ToLower(ioc.Value)) {
-			matches = append(matches, EngineMatch{
-				SignatureID:   ioc.ID,
-				SignatureName: ioc.Description,
-				Severity:      ioc.Severity,
-				Details:       map[string]string{"ioc_type": ioc.IOCType, "value": ioc.Value},
-			})
-		}
-	}
-
-	// Check patterns
+	// Also check custom patterns with simple contains matching
 	for pattern, id := range e.patterns {
-		if strings.Contains(contentLower, strings.ToLower(pattern)) {
-			matches = append(matches, EngineMatch{
+		if strings.Contains(strings.ToLower(content), strings.ToLower(pattern)) {
+			result.Matches = append(result.Matches, EngineMatch{
 				SignatureID:   fmt.Sprintf("pattern_%d", id),
 				SignatureName: fmt.Sprintf("Pattern %d", id),
 				Severity:      2,
@@ -144,7 +83,8 @@ func (e *RustEngine) Detect(content string) (*EngineResult, error) {
 		}
 	}
 
-	return &EngineResult{Matches: matches, TotalMatches: len(matches)}, nil
+	result.TotalMatches = len(result.Matches)
+	return result, nil
 }
 
 // DetectMap performs detection on a map of data

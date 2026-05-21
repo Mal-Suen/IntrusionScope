@@ -206,18 +206,98 @@ func (c *ProcessListCollector) readLinuxProcessInfo(pid int) (*Record, error) {
 	}, nil
 }
 
-// collectWindows 在 Windows 系统上收集进程信息，使用 wmic 或 tasklist 命令
+// collectWindows 在 Windows 系统上收集进程信息
+// 优先使用 PowerShell（兼容 Windows 10/11），回退到 wmic/tasklist
 func (c *ProcessListCollector) collectWindows(ctx context.Context, opts *Options) ([]Record, error) {
 	var records []Record
 
-	// 优先使用 wmic 获取更详细的进程信息
+	// 优先使用 PowerShell Get-Process（兼容 Windows 10/11）
+	records, err := c.collectWindowsPowerShell(ctx, opts)
+	if err == nil && len(records) > 0 {
+		return records, nil
+	}
+
+	// 回退到 wmic（Windows 7/8 及旧版）
+	records, err = c.collectWindowsWMIC(ctx, opts)
+	if err == nil && len(records) > 0 {
+		return records, nil
+	}
+
+	// 最终回退到 tasklist
+	return c.collectWindowsTasklist(ctx, opts)
+}
+
+// collectWindowsPowerShell 使用 PowerShell 收集进程信息
+func (c *ProcessListCollector) collectWindowsPowerShell(ctx context.Context, opts *Options) ([]Record, error) {
+	var records []Record
+
+	// 使用 PowerShell 获取进程信息，输出为 CSV 格式
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+		"Get-Process | Select-Object Id,ProcessName,Path,CommandLine,StartTime | ConvertTo-Csv -NoTypeInformation")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to run PowerShell Get-Process: %w", err)
+	}
+
+	csvReader := csv.NewReader(strings.NewReader(string(output)))
+	lineNum := 0
+	for {
+		fields, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		lineNum++
+
+		// 跳过标题行
+		if lineNum == 1 {
+			continue
+		}
+
+		data := make(map[string]interface{})
+
+		// 解析 PID
+		if pid, err := strconv.Atoi(strings.Trim(fields[0], "\"")); err == nil {
+			data["pid"] = pid
+		}
+
+		data["name"] = strings.Trim(fields[1], "\"")
+		data["exe"] = strings.Trim(fields[2], "\"")
+		data["cmdline"] = strings.Trim(fields[3], "\"")
+		data["creation_date"] = strings.Trim(fields[4], "\"")
+
+		// 获取父进程 ID（需要额外查询）
+		ppidCmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+			fmt.Sprintf("(Get-Process -Id %d).Parent.Id", data["pid"]))
+		ppidOutput, err := ppidCmd.Output()
+		if err == nil {
+			if ppid, err := strconv.Atoi(strings.TrimSpace(string(ppidOutput))); err == nil {
+				data["ppid"] = ppid
+			}
+		}
+
+		records = append(records, Record{
+			Timestamp: time.Now(),
+			Source:    "powershell",
+			Data:      data,
+		})
+	}
+
+	return records, nil
+}
+
+// collectWindowsWMIC 使用 wmic 命令收集进程信息（旧版 Windows 回退方案）
+func (c *ProcessListCollector) collectWindowsWMIC(ctx context.Context, opts *Options) ([]Record, error) {
+	var records []Record
+
 	cmd := exec.CommandContext(ctx, "wmic", "process", "get",
 		"ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate",
 		"/format:csv")
 	output, err := cmd.Output()
 	if err != nil {
-		// 如果 wmic 失败，回退到 tasklist
-		return c.collectWindowsTasklist(ctx, opts)
+		return nil, fmt.Errorf("failed to run wmic: %w", err)
 	}
 
 	// 使用 CSV 解析器处理输出，正确处理引号字段
@@ -270,52 +350,60 @@ func (c *ProcessListCollector) collectWindows(ctx context.Context, opts *Options
 	return records, nil
 }
 
-// collectWindowsTasklist 使用 tasklist 命令收集进程信息（作为 wmic 的备选方案）
+// collectWindowsTasklist 使用 tasklist 命令收集进程信息（作为最终备选方案）
 func (c *ProcessListCollector) collectWindowsTasklist(ctx context.Context, opts *Options) ([]Record, error) {
 	var records []Record
 
+	// 使用 /fo csv 输出标准 CSV 格式，便于正确解析
 	cmd := exec.CommandContext(ctx, "tasklist", "/fo", "csv", "/v")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to run tasklist: %w", err)
 	}
 
-	lines := strings.Split(string(output), "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || i == 0 { // 跳过标题行
+	csvReader := csv.NewReader(strings.NewReader(string(output)))
+	lineNum := 0
+	for {
+		fields, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		lineNum++
+
+		// 跳过标题行
+		if lineNum == 1 {
 			continue
 		}
 
 		// CSV 格式："Image Name","PID","Session Name","Session#","Mem Usage","Status","User Name","CPU Time","Window Title"
-		fields := strings.Split(line, ",")
-		if len(fields) < 4 {
+		if len(fields) < 5 {
 			continue
 		}
 
 		data := make(map[string]interface{})
 
-		// 清理引号包裹的字段
-		name := strings.Trim(fields[0], "\"")
-		pidStr := strings.Trim(fields[1], "\"")
-
-		data["name"] = name
-		if pid, err := strconv.Atoi(pidStr); err == nil {
+		// CSV 解析器已自动去除引号
+		data["name"] = fields[0]
+		if pid, err := strconv.Atoi(fields[1]); err == nil {
 			data["pid"] = pid
 		}
 
 		if len(fields) > 4 {
-			memStr := strings.Trim(fields[4], "\"")
 			// 解析内存使用量（格式如 "123,456 K"）
+			memStr := fields[4]
 			memStr = strings.ReplaceAll(memStr, ",", "")
 			memStr = strings.ReplaceAll(memStr, " K", "")
+			memStr = strings.TrimSpace(memStr)
 			if mem, err := strconv.ParseInt(memStr, 10, 64); err == nil {
 				data["memory_kb"] = mem
 			}
 		}
 
 		if len(fields) > 6 {
-			data["user"] = strings.Trim(fields[6], "\"")
+			data["user"] = fields[6]
 		}
 
 		records = append(records, Record{

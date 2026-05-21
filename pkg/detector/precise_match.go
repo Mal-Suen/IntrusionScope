@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // PreciseMatcher provides precise matching algorithms to avoid false positives
@@ -133,19 +134,31 @@ func MatchBehavioralPattern(content, pattern string) bool {
 	return strings.Contains(contentLower, patternLower)
 }
 
-// CompileRegexPattern 编译正则表达式模式（带缓存）
-var regexCache = make(map[string]*regexp.Regexp)
+// CompileRegexPattern 编译正则表达式模式（带缓存，并发安全）
+var (
+	regexCache   = make(map[string]*regexp.Regexp)
+	regexCacheMu sync.RWMutex
+)
 
 func CompileRegexPattern(pattern string) (*regexp.Regexp, error) {
+	// 先读锁检查缓存
+	regexCacheMu.RLock()
 	if cached, ok := regexCache[pattern]; ok {
+		regexCacheMu.RUnlock()
 		return cached, nil
 	}
-	
+	regexCacheMu.RUnlock()
+
+	// 编译正则
 	compiled, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
-	
+
+	// 写锁更新缓存
+	regexCacheMu.Lock()
 	regexCache[pattern] = compiled
+	regexCacheMu.Unlock()
+
 	return compiled, nil
 }

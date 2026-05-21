@@ -45,6 +45,8 @@
 - 内置 Artifact 模板库,每个 Artifact 封装一组 IFQL 查询逻辑
 - 支持参数化 Artifact,允许运行时自定义采集范围
 - 查询结果自动序列化为 JSON/CSV
+- **LIKE 转义安全**: LIKE 模式转换为正则表达式时，使用 `regexp.QuoteMeta` 转义特殊字符，防止正则注入
+- **CSV/表格输出**: 输出 headers 按 `sort.Strings` 排序，确保跨平台输出一致性
 
 #### 1.2 Artifact 生态
 - 预置标准取证 Artifact(系统信息、进程、网络、文件、日志等)
@@ -74,6 +76,7 @@
 - 完整进程列表(PID、PPID、用户、启动时间、命令行、工作目录、会话 ID)
 - 进程树结构(父子关系可视化,支持深度控制)
 - 线程级信息(线程 ID、状态、CPU 时间)
+- **Windows 采集优先级**: PowerShell Get-Process > wmic > tasklist（CSV 解析）
 
 #### 3.2 进程深度分析
 - 进程打开的文件/句柄(`/proc/[pid]/fd` vs Windows Handle Table)
@@ -81,6 +84,7 @@
 - 进程加载的模块/DLL/SO
 - 进程内存映射概览(VAD 树 / `/proc/[pid]/maps`)
 - 进程命令行参数与环境变量
+- **进程树层级展示**: 基于 PPID 构建层级结构，支持可视化输出
 
 #### 3.3 异常进程检测
 > **借鉴 PEASS-ng 智能检测理念**
@@ -203,12 +207,13 @@
 
 > **融合 Loki + Chainsaw + Hayabusa 检测理念**
 
-#### 9.1 IOC 匹配引擎(四维检测)
-- **文件名 IOC**: 正则匹配可疑文件路径/名称
+### 9.1 IOC 匹配引擎(四维检测)
+- **文件名 IOC**: 正则匹配可疑文件路径/名称（正则缓存支持并发安全读写）
 - **哈希 IOC**: MD5/SHA1/SHA256 恶意文件哈希比对
 - **C2 IOC**: 进程网络连接与已知 C2 IP/域名匹配
-- **YARA 规则**: 文件内容与进程内存 YARA 模式匹配
+- **YARA 规则**: 文件内容与进程内存 YARA 模式匹配（hex 规则支持二进制搜索）
 - 支持自定义 IOC 文件导入(JSON/YAML 格式)
+- IOC 匹配引擎支持 NoCGO 降级模式（无 Rust 环境时使用 Go 原生精确匹配）
 
 #### 9.2 Sigma 规则引擎
 > **借鉴 Chainsaw/Hayabusa Sigma 集成理念**
@@ -217,6 +222,9 @@
 - 规则字段映射(自动适配不同日志源字段命名)
 - 按严重级别/状态/类型动态过滤规则
 - 匹配结果关联 MITRE ATT&CK 战术与技术
+- **多 Selection 支持**: detection 块支持命名 Selection（`selection1`/`selection2` 等），condition 引用命名 Selection 组合
+- **修饰符支持**: `contains`/`all`/`re`/`base64`/`base64offset` 等 Sigma 标准修饰符
+- **logsource 匹配**: 基于 DetectionRecord.Type 字段精确匹配日志源类别
 
 #### 9.3 异常行为标记
 - 异常进程名/路径(系统目录外的 svchost、临时文件执行)
@@ -267,14 +275,22 @@
 
 #### 1.1 时间性能
 
+**基准测试环境**: 
+- CPU: 4核 @ 2.5GHz 或更高
+- 内存: 8GB 可用
+- 磁盘: SSD, 读取速度 > 500MB/s
+- 操作系统: Windows 10/Server 2019 或 Ubuntu 20.04+
+
 | 指标 | 目标值 | 说明 |
 |------|--------|------|
 | 工具启动时间 | < 3 秒 | 从执行到开始采集 |
-| 规则库加载时间 | < 10 秒 | 标准模式规则加载 |
+| 规则库加载时间 | < 10 秒 | 标准模式规则加载 (~5000 条 Sigma + 300 条 YARA) |
+| 规则库加载时间 (full) | < 60 秒 | 全量模式 (~100万哈希 + Bloom Filter 构建) |
 | 快速模式采集 | < 1 分钟 | 仅易失性数据 + 核心系统信息 |
 | 标准模式采集 | < 5 分钟 | 完整系统信息 + 日志 + 文件时间线 |
 | 深度模式采集 | < 15 分钟 | 全量数据 + 内存转储 + 深度检测 |
-| 日志解析性能 | 3GB EVTX + 4000 规则 < 10 分钟 | 参考 Hayabusa 性能 |
+| 日志解析性能 | 3GB EVTX + 4000 规则 < 10 分钟 | 参考 Hayabusa 性能，需 SSD |
+| YARA 扫描性能 | 1000 文件 (平均 1MB) < 60 秒 | 预编译规则，并发扫描 |
 
 #### 1.2 资源占用
 
@@ -303,6 +319,12 @@
 | 规则下载并发 | 4 | 1-8 |
 | 文件扫描并发 | CPU 核心数 | 1-32 |
 | 网络请求超时 | 30 秒 | 5-300 秒 |
+
+#### 1.5 并发安全要求
+- 正则缓存（regexCache）等共享数据结构必须使用 `sync.RWMutex` 保护读写
+- IOC 数据库查询接口必须支持并发安全调用
+- 检测引擎 Detect 方法必须无状态副作用，支持并行调用
+- 采集器 Registry 注册/查询必须线程安全
 
 ### 2. 可靠性要求
 
@@ -597,7 +619,55 @@ intrusionscope decrypt --input output.enc --password
 - **主程序**: Go (跨平台编译、单一二进制、无运行时依赖)
 - **优势**: 结合 Rust 的安全性与性能 + Go 的开发效率与跨平台能力
 
-### 2. 架构设计
+### 2. Rust FFI 与 NoCGO 降级策略
+
+#### 2.1 双模式架构
+
+IntrusionScope 检测引擎支持两种运行模式：
+
+| 模式 | 实现方式 | 性能 | 适用场景 |
+|------|---------|------|---------|
+| **CGO 模式** | Go 调用 Rust FFI | 高性能 | 有 Rust 编译环境、需要极致性能 |
+| **NoCGO 模式** | Go 原生实现 | 中等性能 | 无 Rust 环境、快速部署、跨平台编译 |
+
+#### 2.2 模式选择逻辑
+
+```
+编译时决定:
+┌─────────────────────────────────────────────────────────┐
+│  CGO_ENABLED=1 且 Rust 引擎可用                          │
+│  ├── 使用 rust_engine.go (CGO 绑定)                     │
+│  └── 调用 Rust 高性能检测引擎                            │
+├─────────────────────────────────────────────────────────┤
+│  CGO_ENABLED=0 或 Rust 引擎不可用                        │
+│  ├── 使用 rust_engine_nocgo.go (Go 原生)                │
+│  └── 使用 Go 实现的检测逻辑                              │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 2.3 功能对比
+
+| 功能 | CGO 模式 | NoCGO 模式 |
+|------|---------|-----------|
+| IOC 哈希匹配 | Bloom Filter + HashMap | Go map 精确匹配 |
+| Sigma 规则引擎 | Rust 实现 | Go 实现 (完整功能) |
+| YARA 扫描 | Rust libyara 绑定 | Go 原生解析器 |
+| Aho-Corasick 匹配 | Rust 实现 | Go 实现 |
+| EVTX 解析 | Rust evtx 库 | 待实现 |
+| MFT 解析 | Rust ntfs 库 | 待实现 |
+
+#### 2.4 编译命令
+
+```bash
+# CGO 模式 (需要 Rust 工具链)
+CGO_ENABLED=1 go build -o intrusionscope ./cmd/intrusionscope
+
+# NoCGO 模式 (纯 Go，跨平台编译)
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o intrusionscope ./cmd/intrusionscope
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o intrusionscope.exe ./cmd/intrusionscope
+```
+
+### 3. 架构设计
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -938,18 +1008,25 @@ grr_client_exec --hosts host1,host2,host3 --command "intrusionscope --mode quick
 ### 主命令
 
 ```bash
-intrusionscope [OPTIONS]
-intrusionscope <subcommand> [OPTIONS]
+intrusionscope [command] [OPTIONS]
 
-子命令:
-  rules         规则库管理 (sync/status/stats/import/export/update/clean)
+命令:
+  collect       采集取证数据 (默认命令)
+  detect        运行威胁检测
+  query         使用 IFQL 查询数据
+  report        生成分析报告
+  timeline      生成时间线
+  sync          同步规则库
+  rules         规则库管理 (import/export/status/stats/clean)
   version       显示详细版本信息
   help          显示帮助信息
 ```
 
-### 全局选项
+### collect 子命令 (采集取证数据)
 
 ```bash
+intrusionscope collect [OPTIONS]
+
 模式选择:
   --mode <quick|standard|deep|custom>  采集模式 (默认: standard)
     quick      快速采集(< 1 分钟),仅易失性数据 + 核心系统信息
@@ -957,9 +1034,13 @@ intrusionscope <subcommand> [OPTIONS]
     deep       深度采集(< 15 分钟),全量数据 + 内存转储 + 深度检测
     custom     自定义采集(通过 Artifact 配置文件)
 
+  --all                                采集所有取证数据 (等同于 --mode deep)
+  --artifacts <name,...>               采集指定 Artifact (如: process.list,network.connections)
+
 输出控制:
   --output <path>                      输出目录
   --format <json|csv|markdown|html|all>  输出格式 (默认: all)
+  --file <path>                        输出到单个文件 (JSON 格式)
   --compress                           打包为 tar.gz
   --encrypt                            加密输出包
   --password <password>                加密密码(交互输入更安全)
@@ -991,8 +1072,6 @@ intrusionscope <subcommand> [OPTIONS]
 
 高级选项:
   --memory-dump                        包含完整内存转储
-  --scan-only                          仅扫描检测,不采集数据
-  --analyze-evtx <path>                离线分析 EVTX 文件
   --cleanup                            执行后清理工具痕迹
   --verbose                            详细输出
   --quiet                              静默模式
@@ -1002,6 +1081,35 @@ intrusionscope <subcommand> [OPTIONS]
 通用:
   --version                            显示版本
   --help                               显示帮助
+```
+
+### detect 子命令 (威胁检测)
+
+```bash
+intrusionscope detect [OPTIONS]
+
+输入:
+  -i, --input <path>                   输入数据目录或文件
+  --ioc-file <path>                    自定义 IOC 文件
+  --sigma-rules <path>                 Sigma 规则目录
+  --yara-rules <path>                  YARA 规则目录
+
+输出:
+  -o, --output <path>                  检测结果输出文件
+  --format <json|csv>                  输出格式 (默认: json)
+```
+
+### query 子命令 (IFQL 查询)
+
+```bash
+intrusionscope query <query> [OPTIONS]
+
+参数:
+  <query>                              IFQL 查询语句
+
+示例:
+  intrusionscope query "SELECT * FROM process.list WHERE name LIKE '%powershell%'"
+  intrusionscope query "SELECT * FROM network.connections WHERE state = 'ESTABLISHED'"
 ```
 
 ### rules 子命令
@@ -1041,22 +1149,31 @@ intrusionscope rules <subcommand> [OPTIONS]
 
 ```bash
 # 标准采集
-sudo ./intrusionscope --mode standard --output /tmp/forensics_output
+sudo ./intrusionscope collect --mode standard --output /tmp/forensics_output
+
+# 采集所有数据
+./intrusionscope collect --all --output ./case_001
+
+# 采集指定 Artifact
+./intrusionscope collect --artifacts process.list,network.connections --output ./case_001
 
 # 离线环境快速采集
-./intrusionscope --offline --mode quick --output ./case_001
+./intrusionscope collect --offline --mode quick --output ./case_001
+
+# 运行威胁检测
+./intrusionscope detect -i ./output -o ./detection_results.json
+
+# IFQL 查询
+./intrusionscope query "SELECT * FROM process.list WHERE name LIKE '%powershell%'"
 
 # 通过代理同步规则
-./intrusionscope rules sync --proxy http://proxy:8080
+./intrusionscope sync --proxy http://proxy:8080
 
 # 导入企业自定义 IOC
 ./intrusionscope rules import --file company_iocs.json
 
 # 资源受限环境采集
-./intrusionscope --max-memory 128M --max-threads 2 --mode quick
-
-# 仅运行检测引擎
-./intrusionscope --scan-only --ioc-file custom_iocs.json --output results.json
+./intrusionscope collect --max-memory 128M --max-threads 2 --mode quick
 ```
 
 ---
@@ -1066,7 +1183,8 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 ### Phase 1: 基础框架(MVP) - 3 个月
 
 #### 1.1 项目基础设施
-- [ ] 项目结构搭建(Go + Rust 混合项目)
+- [x] 项目结构搭建(Go + Rust 混合项目)
+- [x] Go 模块定义（go.mod: `github.com/prometheus-labs/intrusionscope`）
 - [ ] 跨平台编译配置(Linux/Windows, x86_64/ARM64)
 - [ ] CI/CD 流水线配置
 - [ ] 代码规范与 Linter 配置
@@ -1084,7 +1202,8 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 
 #### 1.4 基础采集
 - [ ] Linux 基础采集(系统信息、进程、网络)
-- [ ] Windows 基础采集(系统信息、进程、网络)
+- [x] Windows 进程采集（PowerShell Get-Process 优先 + tasklist CSV 解析）
+- [ ] Windows 基础采集(系统信息、网络)
 - [ ] 权限检查与优雅降级
 
 #### 1.5 输出系统
@@ -1108,6 +1227,7 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 
 #### 2.3 关联分析
 - [ ] 进程树构建与可视化
+- [x] 进程树层级构建（buildHierarchicalTree 基于 PPID）
 - [ ] 网络连接与进程关联
 - [ ] 文件时间线生成
 
@@ -1127,6 +1247,8 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 - [ ] 特征库同步框架
 - [ ] 免费数据源下载器(MalwareBazaar、URLhaus 等)
 - [ ] 规则索引构建与 Bloom Filter 加速
+- [x] IOC 数据库基础查询（IOCDatabase.Detect() 精确匹配）
+- [x] NoCGO 降级模式（Go 原生 IOC 精确匹配替代 Rust FFI）
 - [ ] 规则库管理命令(sync/status/import/export)
 - [ ] 离线规则更新支持
 
@@ -1138,7 +1260,10 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 
 #### 3.4 规则引擎
 - [ ] YARA 扫描器集成
+- [x] YARA hex 规则二进制匹配（hex.Decode + bytes.Contains）
 - [ ] Sigma 规则引擎
+- [x] Sigma 多 Selection 支持（命名 Selection + condition 组合）
+- [x] Sigma 修饰符支持（contains/all/re/base64/base64offset）
 - [ ] 规则预编译与缓存
 
 #### 3.5 威胁评估
@@ -1178,8 +1303,10 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 #### 5.1 质量保证
 - [ ] 代码审计与安全审查
 - [ ] 单元测试覆盖率 > 80%
+- [x] 单元测试基础框架建立（精确匹配、IOC 数据库查询）
 - [ ] 集成测试全覆盖
 - [ ] 性能基准测试
+- [ ] 并发安全测试（regexCache、IOCDatabase 等共享数据结构）
 
 #### 5.2 文档完善
 - [ ] 用户手册
@@ -1271,7 +1398,7 @@ sudo ./intrusionscope --mode standard --output /tmp/forensics_output
 
 ---
 
-**文档版本**: v0.3  
+**文档版本**: v0.4  
 **创建日期**: 2026-04-15  
-**最后更新**: 2026-04-15  
-**状态**: 完善版 - 新增威胁特征库管理、环境适配、完善非功能需求与命令行接口
+**最后更新**: 2026-05-21  
+**状态**: 完善版 - 新增威胁特征库管理、环境适配、完善非功能需求与命令行接口；修复项目结构、性能基准、FFI降级策略
